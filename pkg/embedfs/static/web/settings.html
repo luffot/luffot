@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luffot · 管理后台</title>
+    <link rel="stylesheet" href="/static/settings.css">
+</head>
+<body>
+    <!-- ── Header ── -->
+    <header class="header">
+        <div class="header-logo">
+            <span class="logo-icon">🐦</span>
+            <span class="logo-text">Luffot</span>
+        </div>
+
+        <div class="header-right">
+            <span class="header-badge">v1.0.0</span>
+        </div>
+    </header>
+
+    <div class="layout">
+        <!-- ── Sidebar ── -->
+        <nav class="sidebar">
+            <a class="nav-item" data-page="messages" onclick="navigateTo('messages');return false;" href="#">
+                <span class="nav-icon">📊</span>
+                <span class="nav-label">消息总览</span>
+            </a>
+            <div class="nav-divider"></div>
+            <span class="sidebar-section-label">配置管理</span>
+            <a class="nav-item active" data-page="model" onclick="navigateTo('model');return false;" href="#">
+                <span class="nav-icon">🤖</span>
+                <span class="nav-label">模型配置</span>
+            </a>
+            <a class="nav-item" data-page="alert" onclick="navigateTo('alert');return false;" href="#">
+                <span class="nav-icon">🔔</span>
+                <span class="nav-label">告警配置</span>
+            </a>
+            <div class="nav-parent" id="nav-barrage-parent" onclick="toggleBarrageMenu()">
+                <span class="nav-icon">🎯</span>
+                <span class="nav-label">弹幕设置</span>
+                <span class="nav-arrow">▶</span>
+            </div>
+            <div class="nav-sub-menu" id="nav-barrage-submenu">
+                <a class="nav-sub-item" data-page="barrage-filter" onclick="navigateTo('barrage-filter');return false;" href="#">
+                    <span class="sub-icon">🚫</span>弹幕过滤
+                </a>
+                <a class="nav-sub-item" data-page="barrage-highlight" onclick="navigateTo('barrage-highlight');return false;" href="#">
+                    <span class="sub-icon">⭐</span>弹幕特别关注
+                </a>
+            </div>
+            <a class="nav-item" data-page="prompt" onclick="navigateTo('prompt');return false;" href="#">
+                <span class="nav-icon">📝</span>
+                <span class="nav-label">提示词管理</span>
+            </a>
+            <a class="nav-item" data-page="process-monitor" onclick="navigateTo('process-monitor');return false;" href="#">
+                <span class="nav-icon">📱</span>
+                <span class="nav-label">进程监控</span>
+            </a>
+            <a class="nav-item" data-page="skin" onclick="navigateTo('skin');return false;" href="#">
+                <span class="nav-icon">🎨</span>
+                <span class="nav-label">皮肤配置</span>
+            </a>
+            <div class="nav-divider"></div>
+            <span class="sidebar-section-label">环境监测</span>
+            <div class="nav-parent" id="nav-env-parent" onclick="toggleEnvMenu()">
+                <span class="nav-icon">🌐</span>
+                <span class="nav-label">摄像头监测</span>
+                <span class="nav-arrow">▶</span>
+            </div>
+            <div class="nav-sub-menu" id="nav-env-submenu">
+                <a class="nav-sub-item" data-page="camera-settings" onclick="navigateTo('camera-settings');return false;" href="#">
+                    <span class="sub-icon">⚙️</span>监测设置
+                </a>
+                <a class="nav-sub-item" data-page="camera-log" onclick="navigateTo('camera-log');return false;" href="#">
+                    <span class="sub-icon">📋</span>监测记录
+                </a>
+            </div>
+            <div class="nav-divider"></div>
+            <span class="sidebar-section-label">系统</span>
+            <a class="nav-item" data-page="tasks" onclick="navigateTo('tasks');return false;" href="#">
+                <span class="nav-icon">⏱️</span>
+                <span class="nav-label">定时任务</span>
+            </a>
+        </nav>
+
+        <!-- ── Main ── -->
+        <div class="main">
+
+            <!-- 消息总览页 -->
+            <div class="page" id="page-messages">
+                <div class="page-header">
+                    <h1>📊 消息总览</h1>
+                    <p>查看所有监听到的消息，每 5 秒自动刷新</p>
+                </div>
+                <div class="msg-stats">
+                    <div class="msg-stat-card">
+                        <h3>总消息数</h3>
+                        <div class="msg-stat-value" id="msg-total">-</div>
+                    </div>
+                    <div class="msg-stat-card">
+                        <h3>今日消息</h3>
+                        <div class="msg-stat-value" id="msg-today">-</div>
+                    </div>
+                    <div class="msg-stat-card">
+                        <h3>监听应用</h3>
+                        <div class="msg-stat-value" id="msg-app-count">-</div>
+                    </div>
+                </div>
+                <div class="msg-content-grid">
+                    <div class="msg-panel">
+                        <div class="msg-panel-header">
+                            <h3>消息列表</h3>
+                            <div class="msg-search-box">
+                                <input type="text" id="msg-search-input" placeholder="搜索消息...">
+                                <button onclick="searchMessagesInPage()">搜索</button>
+                            </div>
+                        </div>
+                        <div class="msg-list" id="msg-list">
+                            <div style="text-align:center;color:#9ca3af;padding:2rem;">加载中...</div>
+                        </div>
+                    </div>
+                    <div class="msg-panel">
+                        <div class="msg-panel-header">
+                            <h3>监听应用</h3>
+                        </div>
+                        <ul class="msg-app-list" id="msg-app-list">
+                            <li style="text-align:center;color:#9ca3af;padding:1rem;">加载中...</li>
+                        </ul>
+                        <p class="msg-refresh-info">每 5 秒自动刷新</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 模型配置页 -->
+            <div class="page active" id="page-model">
+                <div class="page-header">
+                    <h1>🤖 模型配置</h1>
+                    <p>管理所有 AI Provider，不同功能可指定不同模型，修改后重启生效</p>
+                </div>
+
+                <!-- 全局开关 + 默认 Provider -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">⚙️</span>
+                        <h2>全局设置</h2>
+                        <span class="card-badge" id="ai-status-badge">加载中...</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <div class="toggle-row">
+                                <div class="toggle-info">
+                                    <div class="toggle-label">启用 AI 功能</div>
+                                    <div class="toggle-desc">开启后可与桌宠小钉进行 AI 对话</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="ai-enabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="divider"></div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">默认 Provider</label>
+                                <input type="text" id="default-provider" placeholder="chat">
+                                <div class="form-hint">未指定 provider 时使用此名称</div>
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">最大上下文轮数</label>
+                                <input type="number" id="max-context-rounds" placeholder="10" min="1" max="50">
+                                <div class="form-hint">AI 记忆的最近对话轮数，建议 5~20</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span class="status-dot warn" id="ai-status-dot"></span>
+                        <span id="ai-status-text">正在加载配置...</span>
+                    </div>
+                </div>
+
+                <!-- Provider 列表 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🔌</span>
+                        <h2>Provider 列表</h2>
+                        <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="addProvider()">＋ 添加</button>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <div id="provider-list"></div>
+                    </div>
+                </div>
+
+                <div class="action-bar">
+                    <button class="btn btn-primary" onclick="saveSettings()">💾 保存配置</button>
+                </div>
+            </div>
+
+            <!-- 告警配置页 -->
+            <div class="page" id="page-alert">
+                <div class="page-header">
+                    <h1>🔔 告警配置</h1>
+                    <p>设置关键词告警规则，消息命中时桌宠主动提醒</p>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🔔</span>
+                        <h2>告警规则</h2>
+                        <span class="card-badge" id="alert-status-badge">加载中...</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <div class="toggle-row">
+                                <div class="toggle-info">
+                                    <div class="toggle-label">启用告警检测</div>
+                                    <div class="toggle-desc">消息包含关键词时，桌宠会主动弹出提醒气泡</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="alert-enabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="form-group">
+                            <label class="form-label">告警关键词</label>
+                            <textarea id="alert-keywords" rows="8" style="width:100%;padding:0.75rem 1rem;border:1.5px solid #e5e7eb;border-radius:9px;font-size:0.875rem;color:#1f2937;background:#fafafa;outline:none;resize:vertical;font-family:inherit;line-height:1.7;transition:border-color 0.2s,box-shadow 0.2s;" placeholder="每行一个关键词，大小写不敏感&#10;例如：&#10;紧急&#10;故障&#10;线上问题" onfocus="this.style.borderColor='#6366f1';this.style.boxShadow='0 0 0 3px rgba(99,102,241,0.12)';this.style.background='white'" onblur="this.style.borderColor='#e5e7eb';this.style.boxShadow='none';this.style.background='#fafafa'"></textarea>
+                            <div class="form-hint">每行填写一个关键词，消息内容包含任意一个关键词即触发告警提醒。修改后立即生效，无需重启。</div>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="form-group">
+                            <label class="form-label">🚫 过滤关键词</label>
+                            <textarea id="alert-filter-keywords" rows="5" style="width:100%;padding:0.75rem 1rem;border:1.5px solid #e5e7eb;border-radius:9px;font-size:0.875rem;color:#1f2937;background:#fafafa;outline:none;resize:vertical;font-family:inherit;line-height:1.7;transition:border-color 0.2s,box-shadow 0.2s;" placeholder="每行一个过滤词，大小写不敏感&#10;例如：&#10;测试群&#10;机器人&#10;已解决" onfocus="this.style.borderColor='#f59e0b';this.style.boxShadow='0 0 0 3px rgba(245,158,11,0.12)';this.style.background='white'" onblur="this.style.borderColor='#e5e7eb';this.style.boxShadow='none';this.style.background='#fafafa'"></textarea>
+                            <div class="form-hint">消息内容命中任意过滤词时，<strong>即使包含告警关键词也不会触发告警</strong>。适合屏蔽不关心的群组、机器人消息等。每行一个，修改后立即生效。</div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span class="status-dot ok" id="alert-status-dot"></span>
+                        <span id="alert-status-text">正在加载配置...</span>
+                    </div>
+                </div>
+                <div class="action-bar">
+                    <button class="btn btn-success" onclick="saveAlertConfig()">💾 保存告警规则</button>
+                </div>
+            </div>
+
+            <!-- 弹幕过滤设置页 -->
+            <div class="page" id="page-barrage-filter">
+                <div class="page-header">
+                    <h1>🚫 弹幕过滤设置</h1>
+                    <p>配置过滤关键词，包含关键词的消息将不会出现在弹幕中</p>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🚫</span>
+                        <h2>过滤关键词</h2>
+                        <span class="card-badge" id="barrage-filter-badge">加载中...</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">过滤关键词列表</label>
+                            <textarea id="barrage-filter-keywords" rows="10"
+                                style="width:100%;padding:0.75rem 1rem;border:1.5px solid #e5e7eb;border-radius:9px;font-size:0.875rem;color:#1f2937;background:#fafafa;outline:none;resize:vertical;font-family:inherit;line-height:1.7;transition:border-color 0.2s,box-shadow 0.2s;"
+                                placeholder="每行一个关键词，大小写不敏感&#10;例如：&#10;广告&#10;机器人&#10;测试消息"
+                                onfocus="this.style.borderColor='#ef4444';this.style.boxShadow='0 0 0 3px rgba(239,68,68,0.12)';this.style.background='white'"
+                                onblur="this.style.borderColor='#e5e7eb';this.style.boxShadow='none';this.style.background='#fafafa'"></textarea>
+                            <div class="form-hint">每行填写一个关键词，消息内容包含任意一个关键词时，该消息将被静默过滤，不在弹幕中显示。大小写不敏感，修改后立即生效。</div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span class="status-dot ok" id="barrage-filter-status-dot"></span>
+                        <span id="barrage-filter-status-text">正在加载配置...</span>
+                    </div>
+                </div>
+                <div class="action-bar">
+                    <button class="btn btn-primary" onclick="saveBarrageFilterConfig()">💾 保存过滤设置</button>
+                </div>
+            </div>
+
+            <!-- 弹幕特别关注设置页 -->
+            <div class="page" id="page-barrage-highlight">
+                <div class="page-header">
+                    <h1>⭐ 弹幕特别关注设置</h1>
+                    <p>配置特别关注规则，命中关键词的弹幕将以醒目颜色高亮显示</p>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">⭐</span>
+                        <h2>特别关注规则</h2>
+                        <span class="card-badge" id="barrage-highlight-badge">加载中...</span>
+                        <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="addHighlightRule()">＋ 添加规则</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-hint" style="margin-bottom:1.2rem;padding:0.8rem 1rem;background:#fffbeb;border-radius:8px;border-left:3px solid #f59e0b;color:#92400e;">
+                            消息内容命中关键词时，弹幕将以指定颜色高亮渲染，默认使用金色 <span style="display:inline-block;width:14px;height:14px;background:#FFD700;border-radius:3px;vertical-align:middle;margin:0 2px;border:1px solid #e5e7eb;"></span> <code style="background:#fef3c7;padding:0.1rem 0.4rem;border-radius:4px;">#FFD700</code>。颜色可自定义，修改后立即生效。
+                        </div>
+                        <div id="highlight-rule-list">
+                            <div style="text-align:center;color:#9ca3af;padding:2rem;font-size:0.875rem;">暂无规则，点击「添加规则」创建</div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span class="status-dot ok" id="barrage-highlight-status-dot"></span>
+                        <span id="barrage-highlight-status-text">正在加载配置...</span>
+                    </div>
+                </div>
+                <div class="action-bar">
+                    <button class="btn btn-primary" onclick="saveBarrageHighlightConfig()">💾 保存特别关注规则</button>
+                </div>
+            </div>
+
+            <!-- 提示词管理页 -->
+            <div class="page" id="page-prompt">
+                <div class="page-header">
+                    <h1>📝 提示词管理</h1>
+                    <p>管理 AI 各场景的 Prompt 模板，修改后立即生效，无需重启</p>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">📁</span>
+                        <h2>Prompt 文件</h2>
+                        <span class="card-badge" id="prompt-dir-badge" style="font-family:monospace;font-size:0.65rem;">加载中...</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-hint" style="margin-bottom:1.2rem;padding:0.8rem 1rem;background:#f5f3ff;border-radius:8px;border-left:3px solid #6366f1;color:#4f46e5;">
+                            每个提示词对应 <code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">~/.luffot/prompt/</code> 目录下的一个 Markdown 文件。
+                            User Prompt 模板中可使用 <code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">{{profile}}</code>、<code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">{{messages}}</code>、<code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">{{old_profile}}</code> 占位符。
+                        </div>
+                        <div id="prompt-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 皮肤配置页 -->
+            <div class="page" id="page-skin">
+                <div class="page-header">
+                    <h1>🎨 皮肤配置</h1>
+                    <p>选择桌宠的外观皮肤，切换后立即生效，无需重启</p>
+                </div>
+
+                <!-- 皮肤列表 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🐦</span>
+                        <h2>选择皮肤</h2>
+                        <span class="card-badge" id="skin-current-badge">加载中...</span>
+                        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="toggleSkinImportPanel()">📂 导入皮肤</button>
+                    </div>
+                    <div class="card-body">
+                        <!-- 导入皮肤面板（默认隐藏） -->
+                        <div id="skin-import-panel" style="display:none;margin-bottom:1.2rem;padding:1rem 1.2rem;background:#f0fdf4;border-radius:10px;border:1.5px solid #86efac;">
+                            <div style="font-size:0.875rem;font-weight:600;color:#166534;margin-bottom:0.8rem;">📂 导入 skin-builder 生成的皮肤</div>
+                            <div style="font-size:0.8rem;color:#15803d;margin-bottom:1rem;line-height:1.6;">
+                                使用 <code style="background:#dcfce7;padding:0.1rem 0.4rem;border-radius:4px;font-family:monospace;">go run ./cmd/skin-builder</code> 生成皮肤素材后，
+                                填入生成的皮肤目录路径（如 <code style="background:#dcfce7;padding:0.1rem 0.4rem;border-radius:4px;font-family:monospace;">assets/skins/我的猫咪</code>），即可将皮肤注册到桌宠。
+                            </div>
+                            <div class="form-group" style="margin-bottom:0.8rem;">
+                                <label class="form-label" style="font-size:0.8rem;">皮肤目录路径（绝对路径或相对路径）</label>
+                                <input type="text" id="skin-import-dir" placeholder="例如：/Users/me/luffot/assets/skins/我的猫咪"
+                                    style="width:100%;padding:0.55rem 0.9rem;border:1.5px solid #86efac;border-radius:8px;font-size:0.875rem;background:white;outline:none;"
+                                    onfocus="this.style.borderColor='#22c55e';this.style.boxShadow='0 0 0 3px rgba(34,197,94,0.15)'"
+                                    onblur="this.style.borderColor='#86efac';this.style.boxShadow='none'">
+                            </div>
+                            <div class="form-group" style="margin-bottom:1rem;">
+                                <label class="form-label" style="font-size:0.8rem;">皮肤名称（可选，留空则自动读取 skin_meta.json 或使用目录名）</label>
+                                <input type="text" id="skin-import-name" placeholder="例如：我的猫咪"
+                                    style="width:100%;padding:0.55rem 0.9rem;border:1.5px solid #86efac;border-radius:8px;font-size:0.875rem;background:white;outline:none;"
+                                    onfocus="this.style.borderColor='#22c55e';this.style.boxShadow='0 0 0 3px rgba(34,197,94,0.15)'"
+                                    onblur="this.style.borderColor='#86efac';this.style.boxShadow='none'">
+                            </div>
+                            <div style="display:flex;gap:0.6rem;">
+                                <button id="skin-import-btn" class="btn btn-primary btn-sm" onclick="importSkin()">确认导入</button>
+                                <button class="btn btn-secondary btn-sm" onclick="toggleSkinImportPanel()">取消</button>
+                            </div>
+                        </div>
+
+                        <div id="skin-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;padding:0.5rem 0;">
+                            <div style="text-align:center;color:#9ca3af;padding:2rem;font-size:0.875rem;grid-column:1/-1;">加载中...</div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span class="status-dot ok" id="skin-status-dot"></span>
+                        <span id="skin-status-text">正在加载皮肤列表...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 进程监控配置页 -->
+            <div class="page" id="page-process-monitor">
+                <div class="page-header">
+                    <h1>📱 进程监控</h1>
+                    <p>添加和管理要监控的应用进程，配置 VLModel 识别优化</p>
+                </div>
+
+                <!-- 进程列表 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">📋</span>
+                        <h2>监控进程列表</h2>
+                        <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="addProcessMonitor()">＋ 添加</button>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <div id="process-monitor-list">
+                            <div style="padding:2rem;text-align:center;color:#9ca3af;font-size:0.875rem;">加载中...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 定时任务页 -->
+            <div class="page" id="page-tasks">
+                <div class="page-header">
+                    <h1>⏱️ 定时任务</h1>
+                    <p>查看已注册的定时任务状态，支持手动触发</p>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">📋</span>
+                        <h2>任务列表</h2>
+                        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="loadTasks()">🔄 刷新</button>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <div id="task-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 摄像头监测 · 设置页 -->
+            <div class="page" id="page-camera-settings">
+                <div class="page-header">
+                    <h1>📷 摄像头监测设置</h1>
+                    <p>配置摄像头守卫的检测间隔、AI 分析提示词及使用的模型 Provider</p>
+                </div>
+
+                <!-- 检测间隔 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">⏱️</span>
+                        <h2>检测间隔</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <div class="toggle-row">
+                                <div class="toggle-info">
+                                    <div class="toggle-label">启用摄像头监测</div>
+                                    <div class="toggle-desc">开启后按设定间隔自动拍照并进行 AI 分析</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="camera-enabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="form-group">
+                            <label class="form-label">检测间隔（秒）</label>
+                            <input type="number" id="camera-interval" placeholder="30" min="5" max="3600">
+                            <div class="form-hint">每隔多少秒拍一次照进行检测，建议 15~60 秒，最小 5 秒</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模型 Provider -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🤖</span>
+                        <h2>模型 Provider</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">使用的 Provider 名称</label>
+                            <input type="text" id="camera-provider" placeholder="vision">
+                            <div class="form-hint">填写在「模型配置」中已定义的 Provider 名称，需支持图像输入（Vision）</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 告警策略 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🛡️</span>
+                        <h2>告警策略</h2>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">连续确认次数</label>
+                                <input type="number" id="camera-confirm-count" placeholder="2" min="1" max="10">
+                                <div class="form-hint">连续检测到人几次才触发告警，避免误报，建议 2~3</div>
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">告警冷却时间（秒）</label>
+                                <input type="number" id="camera-cooldown" placeholder="60" min="10" max="3600">
+                                <div class="form-hint">触发告警后多少秒内不再重复告警，建议 60~300</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-bar">
+                    <button class="btn btn-primary" onclick="saveCameraSettings()">💾 保存设置</button>
+                </div>
+            </div>
+
+            <!-- 摄像头监测 · 记录页 -->
+            <div class="page" id="page-camera-log">
+                <div class="page-header">
+                    <h1>📋 监测记录</h1>
+                    <p>复盘每次摄像头守卫检测到背后有人的截图与 AI 分析理由</p>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">📸</span>
+                        <h2>检测记录</h2>
+                        <span class="card-badge" id="camera-log-total-badge">加载中...</span>
+                        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="loadCameraLog()">🔄 刷新</button>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <div id="camera-log-list">
+                            <div style="padding:2rem;text-align:center;color:#9ca3af;font-size:0.875rem;">加载中...</div>
+                        </div>
+                    </div>
+                    <div class="card-footer" id="camera-log-pagination" style="display:none;justify-content:center;gap:0.6rem;">
+                        <button class="btn btn-secondary btn-sm" id="camera-log-prev" onclick="cameraLogPrevPage()">← 上一页</button>
+                        <span id="camera-log-page-info" style="line-height:2rem;font-size:0.82rem;color:#6b7280;"></span>
+                        <button class="btn btn-secondary btn-sm" id="camera-log-next" onclick="cameraLogNextPage()">下一页 →</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 背后有人记录页 -->
+            <div class="page" id="page-guard-log">
+                <div class="page-header">
+                    <h1>👁️ 背后有人记录</h1>
+                    <p>复盘每次摄像头守卫检测到背后有人的截图与 AI 分析理由</p>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">📸</span>
+                        <h2>检测记录</h2>
+                        <span class="card-badge" id="guard-log-total-badge">加载中...</span>
+                        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="loadGuardLog()">🔄 刷新</button>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <div id="guard-log-list">
+                            <div style="padding:2rem;text-align:center;color:#9ca3af;font-size:0.875rem;">加载中...</div>
+                        </div>
+                    </div>
+                    <div class="card-footer" id="guard-log-pagination" style="display:none;justify-content:center;gap:0.6rem;">
+                        <button class="btn btn-secondary btn-sm" id="guard-log-prev" onclick="guardLogPrevPage()">← 上一页</button>
+                        <span id="guard-log-page-info" style="line-height:2rem;font-size:0.82rem;color:#6b7280;"></span>
+                        <button class="btn btn-secondary btn-sm" id="guard-log-next" onclick="guardLogNextPage()">下一页 →</button>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /.main -->
+    </div><!-- /.layout -->
+
+    <!-- 图片灯箱 -->
+    <div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
+        <div class="lightbox-close" onclick="closeLightbox()">✕</div>
+        <img id="lightbox-img" src="" alt="检测截图" onclick="event.stopPropagation()">
+        <div class="lightbox-caption" id="lightbox-caption"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="/static/page-model.js"></script>
+    <script src="/static/page-alert.js"></script>
+    <script src="/static/page-barrage.js"></script>
+    <script src="/static/page-prompt.js"></script>
+    <script src="/static/page-process-monitor.js"></script>
+    <script src="/static/page-tasks.js"></script>
+    <script src="/static/page-messages.js"></script>
+    <script src="/static/page-guard.js"></script>
+    <script src="/static/page-camera.js"></script>
+    <script src="/static/page-skin.js"></script>
+    <script src="/static/settings.js"></script>
+</body>
+</html>

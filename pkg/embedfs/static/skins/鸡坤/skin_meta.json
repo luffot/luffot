@@ -1,0 +1,26 @@
+{
+  "name": "鸡坤",
+  "version": "1.0",
+  "states": {
+    "alert": {
+      "effect": "bounce",
+      "frame_count": 10
+    },
+    "idle": {
+      "effect": "bob",
+      "frame_count": 8
+    },
+    "talking": {
+      "effect": "pulse",
+      "frame_count": 8
+    },
+    "thinking": {
+      "effect": "spin",
+      "frame_count": 12
+    },
+    "typing": {
+      "effect": "bounce",
+      "frame_count": 10
+    }
+  }
+}
