@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/genai"
@@ -60,8 +61,8 @@ const (
 // PlannerAgent 智能规划Agent
 type PlannerAgent struct {
 	*BaseAgent
-	llmAgent agent.Agent
-	model    model.LLM
+	llmAgent agent.Agent // LLM Agent 实例
+	model    model.LLM   // LLM 模型实例
 }
 
 // NewPlannerAgent 创建规划Agent
@@ -186,7 +187,6 @@ func (p *PlannerAgent) callLLM(ctx context.Context, prompt string) (string, erro
 	}
 
 	req := &model.LLMRequest{
-		Model:    "gemini-2.0-flash",
 		Contents: contents,
 		Config: &genai.GenerateContentConfig{
 			Temperature: genai.Ptr(float32(0.7)),
@@ -202,8 +202,8 @@ func (p *PlannerAgent) callLLM(ctx context.Context, prompt string) (string, erro
 
 		if result.Content != nil && len(result.Content.Parts) > 0 {
 			for _, part := range result.Content.Parts {
-				if text := part.Text; text != nil {
-					responseText += *text
+				if part.Text != "" {
+					responseText += part.Text
 				}
 			}
 		}

@@ -16,11 +16,9 @@ type AgentFactory struct {
 // NewAgentFactory 创建Agent工厂
 func NewAgentFactory(engine *Engine, llm model.LLM) *AgentFactory {
 	return &AgentFactory{
-		engine: engine,
-		model:  llm,
-		defaultConfig: AgentConfig{
-			Model: "gemini-2.0-flash",
-		},
+		engine:        engine,
+		model:         llm,
+		defaultConfig: AgentConfig{},
 	}
 }
 
@@ -35,7 +33,6 @@ func (f *AgentFactory) CreatePlanner(name string, instruction string) (*PlannerA
 		Name:        name,
 		Type:        AgentTypePlanner,
 		Description: "负责任务规划和策略制定",
-		Model:       f.defaultConfig.Model,
 		Instruction: instruction,
 	}
 
@@ -57,7 +54,6 @@ func (f *AgentFactory) CreateExecutor(name string, skills []string) (*BaseAgent,
 		Name:        name,
 		Type:        AgentTypeExecutor,
 		Description: "负责任务执行",
-		Model:       f.defaultConfig.Model,
 		Instruction: "你是一个执行Agent，负责高效、准确地完成分配给你的任务。",
 		Skills:      skills,
 	}
@@ -84,7 +80,6 @@ func (f *AgentFactory) CreateReviewer(name string) (*BaseAgent, error) {
 		Name:        name,
 		Type:        AgentTypeReviewer,
 		Description: "负责结果审查和质量控制",
-		Model:       f.defaultConfig.Model,
 		Instruction: `你是一个审查Agent，负责审查工作成果的质量。
 
 审查标准:
@@ -117,7 +112,6 @@ func (f *AgentFactory) CreateSpecialist(name string, specialty string, instructi
 		Name:        name,
 		Type:        AgentTypeSpecialist,
 		Description: fmt.Sprintf("%s领域专家", specialty),
-		Model:       f.defaultConfig.Model,
 		Instruction: instruction,
 		Metadata: map[string]interface{}{
 			"specialty": specialty,
@@ -139,7 +133,6 @@ func (f *AgentFactory) CreateCoordinator(name string) (*CoordinatorAgent, error)
 		Name:        name,
 		Type:        AgentTypeCoordinator,
 		Description: "负责任务协调和Agent调度",
-		Model:       f.defaultConfig.Model,
 		Instruction: "",
 	}
 

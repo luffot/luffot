@@ -164,8 +164,11 @@ func (lc *LangfuseClient) CreateTraceAsync(name string, userID string, metadata 
 // CreateSpan 创建Span（子操作）
 func (lc *LangfuseClient) CreateSpan(ctx context.Context, traceID string, name string, input interface{}) (*langfuse.SpanResponse, error) {
 	if !lc.IsEnabled() {
+		log.Printf("[Langfuse] CreateSpan 被调用但客户端未启用")
 		return nil, nil
 	}
+
+	log.Printf("[Langfuse] CreateSpan 开始: traceID=%s, name=%s", traceID, name)
 
 	now := time.Now()
 	span, err := lc.client.CreateSpan(ctx, langfuse.Span{
@@ -175,16 +178,21 @@ func (lc *LangfuseClient) CreateSpan(ctx context.Context, traceID string, name s
 		StartTime: &now,
 	})
 	if err != nil {
+		log.Printf("[Langfuse] CreateSpan 失败: %v", err)
 		return nil, fmt.Errorf("创建Span失败: %w", err)
 	}
+	log.Printf("[Langfuse] CreateSpan 成功: spanID=%s", span.ID)
 	return span, nil
 }
 
 // UpdateSpan 更新Span（记录输出和结束时间）
 func (lc *LangfuseClient) UpdateSpan(ctx context.Context, spanID string, output interface{}) (*langfuse.SpanResponse, error) {
 	if !lc.IsEnabled() {
+		log.Printf("[Langfuse] UpdateSpan 被调用但客户端未启用")
 		return nil, nil
 	}
+
+	log.Printf("[Langfuse] UpdateSpan 开始: spanID=%s", spanID)
 
 	now := time.Now()
 	span, err := lc.client.UpdateSpan(ctx, spanID, langfuse.SpanUpdate{
@@ -192,19 +200,22 @@ func (lc *LangfuseClient) UpdateSpan(ctx context.Context, spanID string, output 
 		Output:  output,
 	})
 	if err != nil {
+		log.Printf("[Langfuse] UpdateSpan 失败: %v", err)
 		return nil, fmt.Errorf("更新Span失败: %w", err)
 	}
+	log.Printf("[Langfuse] UpdateSpan 成功: spanID=%s", spanID)
 	return span, nil
 }
 
 // CreateGeneration 创建Generation（LLM调用）
-func (lc *LangfuseClient) CreateGeneration(ctx context.Context, traceID string, name string, model string, messages []ChatMessage) (*langfuse.GenerationResponse, error) {
+func (lc *LangfuseClient) CreateGeneration(ctx context.Context, traceID string, parentObservationID string, name string, model string, messages []ChatMessage) (*langfuse.GenerationResponse, error) {
 	if !lc.IsEnabled() {
 		log.Printf("[Langfuse] CreateGeneration 被调用但客户端未启用")
 		return nil, nil
 	}
 
-	log.Printf("[Langfuse] CreateGeneration 开始: traceID=%s, name=%s, model=%s, messagesCount=%d", traceID, name, model, len(messages))
+	log.Printf("[Langfuse] CreateGeneration 开始: traceID=%s, parentObservationID=%s, name=%s, model=%s, messagesCount=%d",
+		traceID, parentObservationID, name, model, len(messages))
 
 	// 转换消息格式
 	inputMessages := make([]map[string]interface{}, len(messages))
@@ -216,7 +227,7 @@ func (lc *LangfuseClient) CreateGeneration(ctx context.Context, traceID string, 
 	}
 
 	now := time.Now()
-	generation, err := lc.client.CreateGeneration(ctx, langfuse.Generation{
+	gen := langfuse.Generation{
 		TraceID:   traceID,
 		Name:      name,
 		Model:     model,
@@ -224,7 +235,15 @@ func (lc *LangfuseClient) CreateGeneration(ctx context.Context, traceID string, 
 		Input: map[string]interface{}{
 			"messages": inputMessages,
 		},
-	})
+	}
+
+	// 如果有父观察ID（如 Span），设置它
+	if parentObservationID != "" {
+		gen.ParentObservationID = parentObservationID
+		log.Printf("[Langfuse] CreateGeneration 设置 ParentObservationID: %s", parentObservationID)
+	}
+
+	generation, err := lc.client.CreateGeneration(ctx, gen)
 	if err != nil {
 		log.Printf("[Langfuse] CreateGeneration 失败: %v", err)
 		return nil, fmt.Errorf("创建Generation失败: %w", err)
@@ -365,16 +384,26 @@ type TraceContext struct {
 	GenerationID string
 	Name         string
 	StartTime    time.Time
+	Input        interface{} // 记录输入
 }
 
-// StartTrace 开始一个新的Trace会话
-func StartTrace(ctx context.Context, name string, userID string, metadata map[string]interface{}) (*TraceContext, error) {
+// StartTrace 开始一个新的Trace会话（业务功能级别）
+// input: 业务功能的输入，会记录在 Trace 的 metadata 中
+func StartTrace(ctx context.Context, name string, userID string, input interface{}, metadata map[string]interface{}) (*TraceContext, error) {
 	lc := GetLangfuseClient()
 	log.Printf("[Langfuse] StartTrace 被调用: name=%s, clientEnabled=%v", name, lc.IsEnabled())
 
 	if !lc.IsEnabled() {
 		log.Printf("[Langfuse] StartTrace 返回 nil，客户端未启用")
 		return nil, nil
+	}
+
+	// 将 input 放入 metadata
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	if input != nil {
+		metadata["input"] = input
 	}
 
 	trace, err := lc.CreateTrace(ctx, name, userID, metadata)
@@ -392,7 +421,28 @@ func StartTrace(ctx context.Context, name string, userID string, metadata map[st
 		TraceID:   trace.ID,
 		Name:      name,
 		StartTime: time.Now(),
+		Input:     input,
 	}, nil
+}
+
+// End 结束Trace，记录输出
+func (tc *TraceContext) End(ctx context.Context, output interface{}) error {
+	lc := GetLangfuseClient()
+	if !lc.IsEnabled() || tc == nil {
+		return nil
+	}
+
+	// 通过创建 Event 来记录输出
+	_, err := lc.CreateEvent(ctx, tc.TraceID, "trace_end", map[string]interface{}{
+		"output":      output,
+		"duration_ms": time.Since(tc.StartTime).Milliseconds(),
+	})
+	if err != nil {
+		log.Printf("[Langfuse] Trace.End 失败: %v", err)
+		return err
+	}
+	log.Printf("[Langfuse] Trace.End 成功: traceID=%s", tc.TraceID)
+	return nil
 }
 
 // StartSpan 在指定Trace下开始一个Span
@@ -437,27 +487,34 @@ func (sc *SpanContext) End(ctx context.Context, output interface{}) error {
 }
 
 // StartGeneration 在指定Trace下开始一个Generation（LLM调用）
+// 注意：这是 Trace 下的子调用，用于追踪大模型请求
 func (tc *TraceContext) StartGeneration(ctx context.Context, name string, model string, messages []ChatMessage) (*GenerationContext, error) {
+	return tc.StartGenerationWithParent(ctx, "", name, model, messages)
+}
+
+// StartGenerationWithParent 在指定Trace和Parent下开始一个Generation（LLM调用）
+// parentObservationID: 父观察ID（如 Span ID），可为空
+func (tc *TraceContext) StartGenerationWithParent(ctx context.Context, parentObservationID string, name string, model string, messages []ChatMessage) (*GenerationContext, error) {
 	lc := GetLangfuseClient()
-	log.Printf("[Langfuse] TraceContext.StartGeneration 被调用: name=%s, model=%s, traceID=%s, clientEnabled=%v, tcIsNil=%v",
-		name, model, tc.TraceID, lc.IsEnabled(), tc == nil)
+	log.Printf("[Langfuse] TraceContext.StartGenerationWithParent 被调用: name=%s, model=%s, traceID=%s, parentObservationID=%s, clientEnabled=%v, tcIsNil=%v",
+		name, model, tc.TraceID, parentObservationID, lc.IsEnabled(), tc == nil)
 
 	if !lc.IsEnabled() || tc == nil {
-		log.Printf("[Langfuse] StartGeneration 返回 nil，clientEnabled=%v, tcIsNil=%v", lc.IsEnabled(), tc == nil)
+		log.Printf("[Langfuse] StartGenerationWithParent 返回 nil，clientEnabled=%v, tcIsNil=%v", lc.IsEnabled(), tc == nil)
 		return nil, nil
 	}
 
-	generation, err := lc.CreateGeneration(ctx, tc.TraceID, name, model, messages)
+	generation, err := lc.CreateGeneration(ctx, tc.TraceID, parentObservationID, name, model, messages)
 	if err != nil {
-		log.Printf("[Langfuse] TraceContext.StartGeneration 失败: %v", err)
+		log.Printf("[Langfuse] TraceContext.StartGenerationWithParent 失败: %v", err)
 		return nil, err
 	}
 	if generation == nil {
-		log.Printf("[Langfuse] TraceContext.StartGeneration 返回 nil generation")
+		log.Printf("[Langfuse] TraceContext.StartGenerationWithParent 返回 nil generation")
 		return nil, nil
 	}
 
-	log.Printf("[Langfuse] TraceContext.StartGeneration 成功: generationID=%s", generation.ID)
+	log.Printf("[Langfuse] TraceContext.StartGenerationWithParent 成功: generationID=%s", generation.ID)
 	return &GenerationContext{
 		TraceID:      tc.TraceID,
 		GenerationID: generation.ID,

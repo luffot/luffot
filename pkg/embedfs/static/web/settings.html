@@ -591,39 +591,8 @@
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-header">
-                        <span class="card-icon">🤖</span>
-                        <h2>LLM 配置</h2>
-                    </div>
-                    <div class="card-body">
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                            <div class="form-group">
-                                <label class="form-label">Provider</label>
-                                <input type="text" id="adk-llm-provider" placeholder="google">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">模型</label>
-                                <input type="text" id="adk-llm-model" placeholder="gemini-2.0-flash">
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">API Key</label>
-                            <input type="password" id="adk-llm-apikey" placeholder="${GEMINI_API_KEY}">
-                            <div class="form-hint">支持环境变量格式，如 ${GEMINI_API_KEY}</div>
-                        </div>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                            <div class="form-group">
-                                <label class="form-label">Temperature</label>
-                                <input type="number" id="adk-llm-temperature" placeholder="0.7" min="0" max="2" step="0.1">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Max Tokens</label>
-                                <input type="number" id="adk-llm-maxtokens" placeholder="4096" min="1">
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <!-- 注意：ADK 使用全局模型配置，不再单独配置 LLM -->
+                <!-- 请在「模型配置」页面配置 Provider 和模型 -->
 
                 <div class="card">
                     <div class="card-header">

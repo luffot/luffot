@@ -20,9 +20,6 @@ type ADKAgentConfig struct {
 	// 系统配置
 	System SystemConfig `yaml:"system"`
 
-	// LLM 配置
-	LLM LLMConfig `yaml:"llm"`
-
 	// Agent 团队配置
 	Agents []AgentItemConfig `yaml:"agents"`
 
@@ -44,15 +41,6 @@ type SystemConfig struct {
 	Name     string `yaml:"name"`
 	Version  string `yaml:"version"`
 	LogLevel string `yaml:"log_level"`
-}
-
-// LLMConfig LLM 配置
-type LLMConfig struct {
-	Provider    string  `yaml:"provider"`
-	Model       string  `yaml:"model"`
-	APIKey      string  `yaml:"api_key"`
-	Temperature float64 `yaml:"temperature"`
-	MaxTokens   int     `yaml:"max_tokens"`
 }
 
 // AgentItemConfig 单个 Agent 配置
@@ -192,13 +180,6 @@ func (cm *ConfigManager) createDefaultAgentConfig(path string) error {
 			Name:     "luffot-adk-system",
 			Version:  "1.0.0",
 			LogLevel: "info",
-		},
-		LLM: LLMConfig{
-			Provider:    "google",
-			Model:       "gemini-2.0-flash",
-			APIKey:      "${GEMINI_API_KEY}",
-			Temperature: 0.7,
-			MaxTokens:   4096,
 		},
 		Agents: []AgentItemConfig{
 			{

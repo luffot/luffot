@@ -145,26 +145,39 @@ func (cp *CameraPatrol) performDetection() {
 	ctx := context.Background()
 
 	// 开始Trace追踪整个检测流程
-	traceCtx, err := StartTrace(ctx, "camera-patrol-analysis", "", map[string]interface{}{
+	traceCtx, err := StartTrace(ctx, "camera-patrol-analysis", "", "camera_frame", map[string]interface{}{
 		"component": "camera_patrol",
 	})
 	if err != nil {
 		log.Printf("[CameraPatrol] 创建Langfuse Trace失败: %v", err)
 	}
+	// 确保Trace结束时记录输出
+	defer func() {
+		if traceCtx != nil {
+			if err := traceCtx.End(ctx, "detection_completed"); err != nil {
+				log.Printf("[CameraPatrol] 结束Trace失败: %v", err)
+			}
+		}
+	}()
 
 	// 开始Span追踪检测流程
-	spanCtx, err := traceCtx.StartSpan(ctx, "detection-flow", map[string]interface{}{
-		"action": "perform_detection",
-	})
-	if err != nil {
-		log.Printf("[CameraPatrol] 创建Langfuse Span失败: %v", err)
+	var spanCtx *SpanContext
+	if traceCtx != nil {
+		spanCtx, err = traceCtx.StartSpan(ctx, "detection-flow", map[string]interface{}{
+			"action": "perform_detection",
+		})
+		if err != nil {
+			log.Printf("[CameraPatrol] 创建Langfuse Span失败: %v", err)
+		}
 	}
 
 	defer func() {
 		if spanCtx != nil {
-			spanCtx.End(ctx, map[string]interface{}{
+			if err := spanCtx.End(ctx, map[string]interface{}{
 				"status": "completed",
-			})
+			}); err != nil {
+				log.Printf("[CameraPatrol] 结束Span失败: %v", err)
+			}
 		}
 	}()
 
@@ -196,13 +209,13 @@ func (cp *CameraPatrol) performDetection() {
 
 	// 使用AI分析图像
 	if cp.agent != nil && cp.agent.IsEnabled() {
-		result := cp.analyzeWithAI(ctx, traceCtx, base64JPEG)
+		result := cp.analyzeWithAI(ctx, traceCtx, spanCtx, base64JPEG)
 		cp.processDetectionResult(result)
 	}
 }
 
 // analyzeWithAI 使用AI分析图像
-func (cp *CameraPatrol) analyzeWithAI(ctx context.Context, traceCtx *TraceContext, base64JPEG string) *DetectionResult {
+func (cp *CameraPatrol) analyzeWithAI(ctx context.Context, traceCtx *TraceContext, spanCtx *SpanContext, base64JPEG string) *DetectionResult {
 	prompt := `分析这张图片，回答以下问题：
 1. 图片中是否有人？（YES/NO）
 2. 有几个人？
@@ -224,15 +237,29 @@ DESCRIPTION: 场景描述`
 		}
 	}
 
-	// 开始Generation追踪LLM调用
-	genCtx, err := traceCtx.StartGeneration(ctx, "image-analysis", modelName, []ChatMessage{
+	// 构建包含图片的完整消息（用于记录到Generation）
+	// 注意：这里记录的是图片的元信息，而不是完整的base64数据（避免数据过大）
+	messages := []ChatMessage{
 		{
 			Role:    "user",
-			Content: prompt,
+			Content: prompt + "\n[图片数据: " + fmt.Sprintf("%d bytes", len(base64JPEG)) + "]",
 		},
-	})
-	if err != nil {
-		log.Printf("[CameraPatrol] 创建Langfuse Generation失败: %v", err)
+	}
+
+	// 开始Generation追踪LLM调用
+	var genCtx *GenerationContext
+	if traceCtx != nil {
+		var err error
+		// 如果存在 Span，将 Generation 关联到 Span
+		parentID := ""
+		if spanCtx != nil {
+			parentID = spanCtx.SpanID
+			log.Printf("[CameraPatrol] 将 Generation 关联到 Span: %s", parentID)
+		}
+		genCtx, err = traceCtx.StartGenerationWithParent(ctx, parentID, "image-analysis", modelName, messages)
+		if err != nil {
+			log.Printf("[CameraPatrol] 创建Langfuse Generation失败: %v", err)
+		}
 	}
 
 	// 记录输入信息
@@ -248,7 +275,10 @@ DESCRIPTION: 场景描述`
 	if err != nil {
 		log.Printf("[CameraPatrol] AI分析失败: %v", err)
 		if genCtx != nil {
-			genCtx.End(ctx, "", inputTokens, 0)
+			// 使用 background context 避免 AnalyzeImageBase64 的 context 被取消导致上报失败
+			if err := genCtx.End(context.Background(), "", inputTokens, 0); err != nil {
+				log.Printf("[CameraPatrol] Generation.End 失败: %v", err)
+			}
 		}
 		return nil
 	}
@@ -256,7 +286,10 @@ DESCRIPTION: 场景描述`
 	// 结束Generation记录输出
 	outputTokens := CalculateTokens(result)
 	if genCtx != nil {
-		genCtx.End(ctx, result, inputTokens, outputTokens)
+		// 使用 background context 避免 AnalyzeImageBase64 的 context 被取消导致上报失败
+		if err := genCtx.End(context.Background(), result, inputTokens, outputTokens); err != nil {
+			log.Printf("[CameraPatrol] Generation.End 失败: %v", err)
+		}
 	}
 
 	// 记录到Trace的metadata中

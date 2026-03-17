@@ -36,14 +36,8 @@ async function loadADKConfig() {
             document.getElementById('adk-log-level').value = data.system.log_level || 'info';
         }
         
-        // 填充 LLM 配置
-        if (data.llm) {
-            document.getElementById('adk-llm-provider').value = data.llm.provider || '';
-            document.getElementById('adk-llm-model').value = data.llm.model || '';
-            document.getElementById('adk-llm-apikey').value = data.llm.api_key || '';
-            document.getElementById('adk-llm-temperature').value = data.llm.temperature || 0.7;
-            document.getElementById('adk-llm-maxtokens').value = data.llm.max_tokens || 4096;
-        }
+        // 注意：ADK 使用全局模型配置，不再单独配置 LLM
+        // LLM 配置请在「模型配置」页面进行设置
         
         // 填充 Agent 列表
         if (data.agents && Array.isArray(data.agents)) {
@@ -157,13 +151,7 @@ async function saveADKConfig() {
                 version: '1.0.0',
                 log_level: document.getElementById('adk-log-level').value || 'info'
             },
-            llm: {
-                provider: document.getElementById('adk-llm-provider').value || 'google',
-                model: document.getElementById('adk-llm-model').value || 'gemini-2.0-flash',
-                api_key: document.getElementById('adk-llm-apikey').value || '${GEMINI_API_KEY}',
-                temperature: parseFloat(document.getElementById('adk-llm-temperature').value) || 0.7,
-                max_tokens: parseInt(document.getElementById('adk-llm-maxtokens').value) || 4096
-            },
+            // 注意：ADK 使用全局模型配置，不再单独配置 LLM
             agents: [],
             skills: {
                 directory: document.getElementById('adk-skills-dir').value || '~/.luffot/adk/skills',
@@ -233,13 +221,7 @@ async function initADKConfig() {
             version: '1.0.0',
             log_level: 'info'
         },
-        llm: {
-            provider: 'google',
-            model: 'gemini-2.0-flash',
-            api_key: '${GEMINI_API_KEY}',
-            temperature: 0.7,
-            max_tokens: 4096
-        },
+        // 注意：ADK 使用全局模型配置，不再单独配置 LLM
         agents: [
             {
                 name: 'coordinator',
@@ -292,11 +274,7 @@ async function initADKConfig() {
     document.getElementById('adk-system-name').value = defaultConfig.system.name;
     document.getElementById('adk-log-level').value = defaultConfig.system.log_level;
     
-    document.getElementById('adk-llm-provider').value = defaultConfig.llm.provider;
-    document.getElementById('adk-llm-model').value = defaultConfig.llm.model;
-    document.getElementById('adk-llm-apikey').value = defaultConfig.llm.api_key;
-    document.getElementById('adk-llm-temperature').value = defaultConfig.llm.temperature;
-    document.getElementById('adk-llm-maxtokens').value = defaultConfig.llm.max_tokens;
+    // 注意：ADK 使用全局模型配置，不再单独配置 LLM
     
     renderADKAgents(defaultConfig.agents);
     
