@@ -1,0 +1,108 @@
+# ADK Agent 配置示例
+# 用于配置多Agent系统的行为和参数
+
+# 系统配置
+system:
+  name: "luffot-adk-system"
+  version: "1.0.0"
+  log_level: "info"
+  
+# LLM 配置
+llm:
+  provider: "google"
+  model: "gemini-2.0-flash"
+  api_key: "${GEMINI_API_KEY}"  # 从环境变量读取
+  temperature: 0.7
+  max_tokens: 4096
+
+# Agent 团队配置
+agents:
+  # 协调Agent
+  - name: coordinator
+    type: coordinator
+    description: "负责任务协调和Agent调度"
+    
+  # 规划Agent
+  - name: planner
+    type: planner
+    description: "负责任务规划和策略制定"
+    instruction: |
+      你是一个智能规划Agent。
+      你的职责:
+      1. 分析复杂任务，理解目标和约束
+      2. 将任务分解为可执行的步骤
+      3. 为每个步骤分配合适的Agent和技能
+      4. 识别步骤间的依赖关系
+      5. 生成详细的执行计划
+      
+  # 执行Agent
+  - name: executor
+    type: executor
+    description: "负责任务执行"
+    skills:
+      - example-skill
+      - file-operation
+      - web-search
+      
+  # 审查Agent
+  - name: reviewer
+    type: reviewer
+    description: "负责结果审查和质量控制"
+    
+  # 专家Agent
+  - name: code-expert
+    type: specialist
+    description: "代码领域专家"
+    specialty: "code"
+    instruction: |
+      你是代码专家，擅长代码审查、重构和优化。
+      你的专长包括:
+      - 代码质量评估
+      - 性能优化建议
+      - 安全漏洞检测
+      - 最佳实践指导
+
+# 技能目录配置
+skills:
+  directory: "./skills"
+  auto_load: true
+  installed:
+    - name: example-skill
+      version: "1.0.0"
+      source: "builtin"
+    - name: file-operation
+      version: "1.0.0"
+      source: "builtin"
+
+# 工作流配置
+workflows:
+  - name: code-review
+    description: "代码审查工作流"
+    steps:
+      - agent: planner
+        action: analyze
+      - agent: code-expert
+        action: review
+      - agent: reviewer
+        action: validate
+        
+  - name: task-execution
+    description: "标准任务执行工作流"
+    steps:
+      - agent: planner
+        action: plan
+      - agent: executor
+        action: execute
+      - agent: reviewer
+        action: review
+
+# 内存配置
+memory:
+  type: "sqlite"
+  path: "./data/memory.db"
+  max_history: 100
+
+# 事件配置
+events:
+  enabled: true
+  buffer_size: 1000

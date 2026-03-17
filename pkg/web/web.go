@@ -16,6 +16,7 @@ import (
 	"github.com/luffot/luffot/pkg/prompt"
 	"github.com/luffot/luffot/pkg/scheduler"
 	"github.com/luffot/luffot/pkg/storage"
+	"gopkg.in/yaml.v3"
 )
 
 // capturesDir 告警截图目录（与 manager.go 保持一致）
@@ -73,6 +74,7 @@ func (s *Server) initRoutes() {
 	http.HandleFunc("/api/camera-detections", s.handleCameraDetections)
 	http.HandleFunc("/api/skin", s.handleSkinAPI)
 	http.HandleFunc("/api/skin/import", s.handleSkinImportAPI)
+	http.HandleFunc("/api/adk/config", s.handleADKConfigAPI)
 	http.Handle("/static/", http.StripPrefix("/static/", mimeAwareFSServer(s.staticFS)))
 	// 提供告警截图的静态文件访问（/captures/{filename}）
 	http.Handle("/captures/", http.StripPrefix("/captures/", http.FileServer(http.Dir(capturesDir))))
@@ -772,4 +774,69 @@ func mimeAwareFSServer(staticFS fs.FS) http.Handler {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// handleADKConfigAPI ADK 配置 API（GET 读取，PUT 保存）
+func (s *Server) handleADKConfigAPI(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+
+	switch r.Method {
+	case "GET":
+		// 读取 ADK 配置文件
+		adkConfigPath := filepath.Join(os.Getenv("HOME"), ".luffot", "adk", "agent_config.yaml")
+		data, err := os.ReadFile(adkConfigPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				respondJSON(w, http.StatusOK, map[string]interface{}{
+					"enabled": false,
+					"message": "ADK 配置不存在，请先初始化",
+				})
+				return
+			}
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		// 解析 YAML 为通用 map
+		var config map[string]interface{}
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		respondJSON(w, http.StatusOK, config)
+
+	case "PUT":
+		var config map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的请求体"})
+			return
+		}
+
+		// 转换为 YAML
+		data, err := yaml.Marshal(config)
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		// 确保目录存在
+		adkDir := filepath.Join(os.Getenv("HOME"), ".luffot", "adk")
+		if err := os.MkdirAll(adkDir, 0755); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		// 保存配置文件
+		adkConfigPath := filepath.Join(adkDir, "agent_config.yaml")
+		if err := os.WriteFile(adkConfigPath, data, 0644); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		respondJSON(w, http.StatusOK, map[string]string{"message": "ADK 配置保存成功"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }

@@ -1,0 +1,31 @@
+name: example-skill
+version: 1.0.0
+description: 示例技能，展示如何配置和使用技能
+type: lua  # 可选: builtin, http, python, lua
+entry: main.lua  # 入口文件
+
+# 参数定义
+parameters:
+  - name: message
+    type: string
+    description: 输入消息
+    required: true
+  - name: count
+    type: number
+    description: 重复次数
+    required: false
+    default: 1
+
+# 返回值定义
+returns:
+  - name: result
+    type: string
+    description: 处理结果
+  - name: status
+    type: string
+    description: 执行状态
+
+# 配置项
+config:
+  timeout: 30
+  retry: 3

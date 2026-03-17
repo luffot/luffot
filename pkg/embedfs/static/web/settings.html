@@ -61,6 +61,10 @@
                 <span class="nav-icon">🎨</span>
                 <span class="nav-label">皮肤配置</span>
             </a>
+            <a class="nav-item" data-page="adk" onclick="navigateTo('adk');return false;" href="#">
+                <span class="nav-icon">🧠</span>
+                <span class="nav-label">ADK 配置</span>
+            </a>
             <div class="nav-divider"></div>
             <span class="sidebar-section-label">环境监测</span>
             <div class="nav-parent" id="nav-env-parent" onclick="toggleEnvMenu()">
@@ -553,6 +557,134 @@
                 </div>
             </div>
 
+            <!-- ADK 配置页 -->
+            <div class="page" id="page-adk">
+                <div class="page-header">
+                    <h1>🧠 ADK 配置</h1>
+                    <p>配置多 Agent 系统（Agent Development Kit），支持智能任务规划和执行</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">⚙️</span>
+                        <h2>系统配置</h2>
+                        <span class="card-badge" id="adk-status-badge">加载中...</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">系统名称</label>
+                            <input type="text" id="adk-system-name" placeholder="luffot-adk-system">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">日志级别</label>
+                            <select id="adk-log-level" class="form-select">
+                                <option value="debug">debug</option>
+                                <option value="info" selected>info</option>
+                                <option value="warn">warn</option>
+                                <option value="error">error</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🤖</span>
+                        <h2>LLM 配置</h2>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                            <div class="form-group">
+                                <label class="form-label">Provider</label>
+                                <input type="text" id="adk-llm-provider" placeholder="google">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">模型</label>
+                                <input type="text" id="adk-llm-model" placeholder="gemini-2.0-flash">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">API Key</label>
+                            <input type="password" id="adk-llm-apikey" placeholder="${GEMINI_API_KEY}">
+                            <div class="form-hint">支持环境变量格式，如 ${GEMINI_API_KEY}</div>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                            <div class="form-group">
+                                <label class="form-label">Temperature</label>
+                                <input type="number" id="adk-llm-temperature" placeholder="0.7" min="0" max="2" step="0.1">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Max Tokens</label>
+                                <input type="number" id="adk-llm-maxtokens" placeholder="4096" min="1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">👥</span>
+                        <h2>Agent 团队</h2>
+                        <span class="form-hint">配置多 Agent 系统的 Agent 列表</span>
+                    </div>
+                    <div class="card-body">
+                        <div id="adk-agents-list"></div>
+                        <button class="btn btn-secondary btn-sm" onclick="addADKAgent()" style="margin-top:1rem;">＋ 添加 Agent</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🛠️</span>
+                        <h2>技能配置</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label class="form-label">技能目录</label>
+                            <input type="text" id="adk-skills-dir" placeholder="~/.luffot/adk/skills">
+                        </div>
+                        <div class="form-group">
+                            <div class="toggle-row">
+                                <div class="toggle-info">
+                                    <div class="toggle-label">自动加载技能</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="adk-skills-autoload" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">📝</span>
+                        <h2>内存配置</h2>
+                    </div>
+                    <div class="card-body">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                            <div class="form-group">
+                                <label class="form-label">存储类型</label>
+                                <select id="adk-memory-type" class="form-select">
+                                    <option value="sqlite" selected>sqlite</option>
+                                    <option value="memory">memory</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">最大历史记录</label>
+                                <input type="number" id="adk-memory-maxhistory" placeholder="100" min="1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-bar">
+                    <button class="btn btn-primary" onclick="saveADKConfig()">💾 保存 ADK 配置</button>
+                    <button class="btn btn-secondary" onclick="initADKConfig()" style="margin-left:0.5rem;">🔄 初始化默认配置</button>
+                </div>
+            </div>
+
         </div><!-- /.main -->
     </div><!-- /.layout -->
 
@@ -575,6 +707,7 @@
     <script src="/static/page-guard.js"></script>
     <script src="/static/page-camera.js"></script>
     <script src="/static/page-skin.js"></script>
+    <script src="/static/page-adk.js"></script>
     <script src="/static/settings.js"></script>
 </body>
 </html>

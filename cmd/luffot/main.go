@@ -42,8 +42,9 @@ func init() {
 	log.SetOutput(os.Stdout)
 
 	defaultConfigPath := filepath.Join(os.Getenv("HOME"), ".luffot", "config.yaml")
+	defaultDataDir := filepath.Join(os.Getenv("HOME"), ".luffot", "data")
 	flag.StringVar(&configPath, "config", defaultConfigPath, "配置文件路径")
-	flag.StringVar(&dataDir, "data", "./data", "数据目录")
+	flag.StringVar(&dataDir, "data", defaultDataDir, "数据目录")
 	flag.BoolVar(&showVersion, "version", false, "显示版本号")
 	flag.BoolVar(&enableBarrage, "barrage", true, "是否启用弹幕显示")
 	flag.IntVar(&barrageWidth, "barrage-width", 800, "弹幕窗口宽度")
