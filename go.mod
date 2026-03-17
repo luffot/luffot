@@ -3,6 +3,7 @@ module github.com/luffot/luffot
 go 1.24.4
 
 require (
+	github.com/AEKurt/langfuse-go v0.1.6
 	github.com/hajimehoshi/ebiten/v2 v2.6.7
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/robfig/cron/v3 v3.0.1

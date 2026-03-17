@@ -99,6 +99,7 @@ function navigateTo(pageId) {
     if (pageId === "barrage-highlight") loadBarrageHighlightConfig();
     if (pageId === "process-monitor") loadProcessMonitorConfig();
     if (pageId === "skin") loadSkins();
+    if (pageId === "langfuse") loadLangfuseConfig();
 }
 
 // ESC 键关闭灯箱

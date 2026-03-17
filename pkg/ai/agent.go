@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	_ "github.com/AEKurt/langfuse-go"
 	"github.com/luffot/luffot/pkg/config"
 	"github.com/luffot/luffot/pkg/prompt"
 )
@@ -80,6 +81,8 @@ type Agent struct {
 	onReply func(reply string)
 	// 流式 token 回调（每收到一个 token 片段就调用一次）
 	onToken func(token string)
+	// Langfuse 追踪会话 ID
+	traceID string
 }
 
 // NewAgent 创建 AI 智能体
@@ -227,14 +230,43 @@ func (a *Agent) callLLMStream(userInput string, providerCfg *config.AIProviderCo
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
+	// 创建Langfuse Generation
+	lc := GetLangfuseClient()
+	var genCtx *GenerationContext
+	if lc.IsEnabled() {
+		traceCtx, _ := StartTrace(context.Background(), "agent-chat-stream", "user", map[string]interface{}{
+			"provider": providerCfg.Provider,
+			"model":    providerCfg.Model,
+		})
+		if traceCtx != nil {
+			genCtx, _ = traceCtx.StartGeneration(context.Background(), "llm-call-stream", providerCfg.Model, messages)
+		}
+	}
+
+	startTime := time.Now()
+	var reply string
+	var err error
+
 	switch providerCfg.Provider {
 	case config.ProviderDashScope:
-		return a.doStreamRequestDashScope(ctx, messages, providerCfg, onToken)
+		reply, err = a.doStreamRequestDashScope(ctx, messages, providerCfg, onToken)
 	case config.ProviderCoPaw:
-		return a.doStreamRequestCoPaw(ctx, userInput, providerCfg, onToken)
+		reply, err = a.doStreamRequestCoPaw(ctx, userInput, providerCfg, onToken)
 	default:
-		return a.doStreamRequestOpenAICompat(ctx, messages, providerCfg, onToken)
+		reply, err = a.doStreamRequestOpenAICompat(ctx, messages, providerCfg, onToken)
 	}
+
+	duration := time.Since(startTime)
+
+	// 更新Generation
+	if genCtx != nil {
+		inputTokens := CalculateMessagesTokens(messages)
+		outputTokens := CalculateTokens(reply)
+		genCtx.End(context.Background(), reply, inputTokens, outputTokens)
+		log.Printf("[Langfuse] 流式调用完成，耗时: %v, 输入token: %d, 输出token: %d", duration, inputTokens, outputTokens)
+	}
+
+	return reply, err
 }
 
 // openAIStreamDelta OpenAI SSE 流式响应中的 delta 字段
@@ -480,7 +512,33 @@ func (a *Agent) callLLM(userInput string, providerCfg *config.AIProviderConfig) 
 	timeout := a.aiConfig().GetEffectiveTimeout(providerCfg)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
-	return a.doRequest(ctx, messages, providerCfg)
+
+	// 创建Langfuse Generation
+	lc := GetLangfuseClient()
+	var genCtx *GenerationContext
+	if lc.IsEnabled() {
+		traceCtx, _ := StartTrace(context.Background(), "agent-chat", "user", map[string]interface{}{
+			"provider": providerCfg.Provider,
+			"model":    providerCfg.Model,
+		})
+		if traceCtx != nil {
+			genCtx, _ = traceCtx.StartGeneration(context.Background(), "llm-call", providerCfg.Model, messages)
+		}
+	}
+
+	startTime := time.Now()
+	reply, err := a.doRequest(ctx, messages, providerCfg)
+	duration := time.Since(startTime)
+
+	// 更新Generation
+	if genCtx != nil {
+		inputTokens := CalculateMessagesTokens(messages)
+		outputTokens := CalculateTokens(reply)
+		genCtx.End(context.Background(), reply, inputTokens, outputTokens)
+		log.Printf("[Langfuse] 调用完成，耗时: %v, 输入token: %d, 输出token: %d", duration, inputTokens, outputTokens)
+	}
+
+	return reply, err
 }
 
 // buildMessages 构建完整的消息列表（系统 prompt + 用户画像上下文 + 历史上下文 + 当前输入）
@@ -536,18 +594,62 @@ func resolveBaseURL(providerCfg *config.AIProviderConfig) string {
 
 // doRequest 根据 provider 选择对应的接口规范发起请求
 func (a *Agent) doRequest(ctx context.Context, messages []ChatMessage, providerCfg *config.AIProviderConfig) (string, error) {
+	// 创建Langfuse Generation
+	lc := GetLangfuseClient()
+	var genCtx *GenerationContext
+	if lc.IsEnabled() {
+		traceCtx, _ := StartTrace(ctx, "agent-request", "user", map[string]interface{}{
+			"provider": providerCfg.Provider,
+			"model":    providerCfg.Model,
+		})
+		if traceCtx != nil {
+			genCtx, _ = traceCtx.StartGeneration(ctx, "llm-request", providerCfg.Model, messages)
+		}
+	}
+
+	startTime := time.Now()
+	var reply string
+	var err error
+
 	switch providerCfg.Provider {
 	case config.ProviderDashScope:
-		return a.doRequestDashScope(ctx, messages, providerCfg)
+		reply, err = a.doRequestDashScope(ctx, messages, providerCfg)
 	default:
 		// openai、bailian 以及未配置 provider 时均走 OpenAI 兼容格式
-		return a.doRequestOpenAICompat(ctx, messages, providerCfg)
+		reply, err = a.doRequestOpenAICompat(ctx, messages, providerCfg)
 	}
+
+	duration := time.Since(startTime)
+
+	// 更新Generation
+	if genCtx != nil {
+		inputTokens := CalculateMessagesTokens(messages)
+		outputTokens := CalculateTokens(reply)
+		genCtx.End(ctx, reply, inputTokens, outputTokens)
+		log.Printf("[Langfuse] doRequest完成，耗时: %v, 输入token: %d, 输出token: %d", duration, inputTokens, outputTokens)
+	}
+
+	return reply, err
 }
 
 // doRequestOpenAICompat 使用 OpenAI 兼容接口发起请求
 // 适用于：OpenAI、阿里云百炼 compatible-mode、DeepSeek、Moonshot 等
 func (a *Agent) doRequestOpenAICompat(ctx context.Context, messages []ChatMessage, providerCfg *config.AIProviderConfig) (string, error) {
+	// 创建Langfuse Generation
+	lc := GetLangfuseClient()
+	var genCtx *GenerationContext
+	if lc.IsEnabled() {
+		traceCtx, _ := StartTrace(ctx, "openai-compat-request", "user", map[string]interface{}{
+			"provider": providerCfg.Provider,
+			"model":    providerCfg.Model,
+		})
+		if traceCtx != nil {
+			genCtx, _ = traceCtx.StartGeneration(ctx, "openai-compat-call", providerCfg.Model, messages)
+		}
+	}
+
+	startTime := time.Now()
+
 	reqBody := openAIRequest{
 		Model:    providerCfg.Model,
 		Messages: messages,
@@ -556,6 +658,9 @@ func (a *Agent) doRequestOpenAICompat(ctx context.Context, messages []ChatMessag
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("序列化请求失败: %w", err)
 	}
 
@@ -565,6 +670,9 @@ func (a *Agent) doRequestOpenAICompat(ctx context.Context, messages []ChatMessag
 
 	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyBytes))
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("创建请求失败: %w", err)
 	}
 
@@ -574,12 +682,18 @@ func (a *Agent) doRequestOpenAICompat(ctx context.Context, messages []ChatMessag
 	httpClient := a.newHTTPClient(providerCfg)
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("HTTP 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("读取响应体失败: %w", err)
 	}
 
@@ -591,7 +705,13 @@ func (a *Agent) doRequestOpenAICompat(ctx context.Context, messages []ChatMessag
 		// 尝试解析 error 字段给出更友好的提示
 		var errResp openAIResponse
 		if jsonErr := json.Unmarshal(respBytes, &errResp); jsonErr == nil && errResp.Error != nil {
+			if genCtx != nil {
+				genCtx.End(ctx, "", 0, 0)
+			}
 			return "", fmt.Errorf("API 返回错误 (HTTP %d): %s", resp.StatusCode, errResp.Error.Message)
+		}
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
 		}
 		return "", fmt.Errorf("API 返回非预期状态码 (HTTP %d)，响应: %s", resp.StatusCode, string(respBytes))
 	}
@@ -599,19 +719,38 @@ func (a *Agent) doRequestOpenAICompat(ctx context.Context, messages []ChatMessag
 	var openAIResp openAIResponse
 	if err := json.Unmarshal(respBytes, &openAIResp); err != nil {
 		log.Printf("[AI] 响应体解析失败，原始内容: %s", string(respBytes))
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("解析响应失败: %w", err)
 	}
 
 	if openAIResp.Error != nil {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("API 错误: %s", openAIResp.Error.Message)
 	}
 
 	if len(openAIResp.Choices) == 0 {
 		log.Printf("[AI] 响应体无 choices，原始内容: %s", string(respBytes))
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("API 返回空结果（choices 为空）")
 	}
 
-	return strings.TrimSpace(openAIResp.Choices[0].Message.Content), nil
+	reply := strings.TrimSpace(openAIResp.Choices[0].Message.Content)
+
+	// 更新Generation
+	if genCtx != nil {
+		inputTokens := CalculateMessagesTokens(messages)
+		outputTokens := CalculateTokens(reply)
+		genCtx.End(ctx, reply, inputTokens, outputTokens)
+		log.Printf("[Langfuse] OpenAI兼容请求完成，耗时: %v, 输入token: %d, 输出token: %d", time.Since(startTime), inputTokens, outputTokens)
+	}
+
+	return reply, nil
 }
 
 // dashScopeRequest DashScope 原生接口请求体
@@ -704,6 +843,25 @@ func (a *Agent) AnalyzeImageBase64(base64JPEG string, prompt string, providerNam
 		},
 	}
 
+	// 创建Langfuse Generation
+	lc := GetLangfuseClient()
+	var genCtx *GenerationContext
+	if lc.IsEnabled() {
+		// 将visionMessage转换为ChatMessage用于追踪
+		chatMessages := []ChatMessage{
+			{Role: "user", Content: prompt + " [image analysis]"},
+		}
+		traceCtx, _ := StartTrace(context.Background(), "vision-analysis", "user", map[string]interface{}{
+			"provider": providerCfg.Provider,
+			"model":    providerCfg.Model,
+		})
+		if traceCtx != nil {
+			genCtx, _ = traceCtx.StartGeneration(context.Background(), "vision-call", providerCfg.Model, chatMessages)
+		}
+	}
+
+	startTime := time.Now()
+
 	// 使用流式模式：服务端一旦开始输出 token 就持续发送数据，
 	// 避免视觉模型推理耗时长时 HTTP client 因连接空闲而超时。
 	reqBody := visionRequest{
@@ -715,6 +873,9 @@ func (a *Agent) AnalyzeImageBase64(base64JPEG string, prompt string, providerNam
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(context.Background(), "", 0, 0)
+		}
 		return "", fmt.Errorf("序列化视觉请求失败: %w", err)
 	}
 
@@ -728,6 +889,9 @@ func (a *Agent) AnalyzeImageBase64(base64JPEG string, prompt string, providerNam
 
 	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyBytes))
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(context.Background(), "", 0, 0)
+		}
 		return "", fmt.Errorf("创建视觉请求失败: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -737,6 +901,9 @@ func (a *Agent) AnalyzeImageBase64(base64JPEG string, prompt string, providerNam
 	httpClient := a.newHTTPClient(providerCfg)
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(context.Background(), "", 0, 0)
+		}
 		return "", fmt.Errorf("视觉 HTTP 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -744,6 +911,9 @@ func (a *Agent) AnalyzeImageBase64(base64JPEG string, prompt string, providerNam
 	if resp.StatusCode != http.StatusOK {
 		bodyContent, _ := io.ReadAll(resp.Body)
 		log.Printf("[Camera] 视觉 API 错误响应: %s", string(bodyContent))
+		if genCtx != nil {
+			genCtx.End(context.Background(), "", 0, 0)
+		}
 		var errResp openAIResponse
 		if jsonErr := json.Unmarshal(bodyContent, &errResp); jsonErr == nil && errResp.Error != nil {
 			return "", fmt.Errorf("视觉 API 错误 (HTTP %d): %s", resp.StatusCode, errResp.Error.Message)
@@ -779,6 +949,9 @@ func (a *Agent) AnalyzeImageBase64(base64JPEG string, prompt string, providerNam
 	}
 
 	if scanErr := scanner.Err(); scanErr != nil {
+		if genCtx != nil {
+			genCtx.End(context.Background(), "", 0, 0)
+		}
 		return fullReply.String(), fmt.Errorf("读取视觉 SSE 流失败: %w", scanErr)
 	}
 
@@ -787,7 +960,18 @@ func (a *Agent) AnalyzeImageBase64(base64JPEG string, prompt string, providerNam
 
 	if content == "" {
 		log.Printf("[Camera] 视觉 API 流式响应返回空 content")
+		if genCtx != nil {
+			genCtx.End(context.Background(), "", 0, 0)
+		}
 		return "", fmt.Errorf("视觉 API 返回空 content")
+	}
+
+	// 更新Generation
+	if genCtx != nil {
+		inputTokens := CalculateTokens(prompt)
+		outputTokens := CalculateTokens(content)
+		genCtx.End(context.Background(), content, inputTokens, outputTokens)
+		log.Printf("[Langfuse] 视觉分析完成，耗时: %v, 输入token: %d, 输出token: %d", time.Since(startTime), inputTokens, outputTokens)
 	}
 
 	return content, nil
@@ -937,6 +1121,21 @@ func (a *Agent) doStreamRequestCoPaw(ctx context.Context, userInput string, prov
 
 // doRequestDashScope 使用阿里云 DashScope 原生接口发起请求
 func (a *Agent) doRequestDashScope(ctx context.Context, messages []ChatMessage, providerCfg *config.AIProviderConfig) (string, error) {
+	// 创建Langfuse Generation
+	lc := GetLangfuseClient()
+	var genCtx *GenerationContext
+	if lc.IsEnabled() {
+		traceCtx, _ := StartTrace(ctx, "dashscope-request", "user", map[string]interface{}{
+			"provider": providerCfg.Provider,
+			"model":    providerCfg.Model,
+		})
+		if traceCtx != nil {
+			genCtx, _ = traceCtx.StartGeneration(ctx, "dashscope-call", providerCfg.Model, messages)
+		}
+	}
+
+	startTime := time.Now()
+
 	var reqBody dashScopeRequest
 	reqBody.Model = providerCfg.Model
 	reqBody.Input.Messages = messages
@@ -944,6 +1143,9 @@ func (a *Agent) doRequestDashScope(ctx context.Context, messages []ChatMessage, 
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("序列化请求失败: %w", err)
 	}
 
@@ -952,6 +1154,9 @@ func (a *Agent) doRequestDashScope(ctx context.Context, messages []ChatMessage, 
 
 	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyBytes))
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("创建请求失败: %w", err)
 	}
 
@@ -961,12 +1166,18 @@ func (a *Agent) doRequestDashScope(ctx context.Context, messages []ChatMessage, 
 	httpClient := a.newHTTPClient(providerCfg)
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("HTTP 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("读取响应体失败: %w", err)
 	}
 
@@ -974,29 +1185,50 @@ func (a *Agent) doRequestDashScope(ctx context.Context, messages []ChatMessage, 
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[AI] 错误响应体: %s", string(respBytes))
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("DashScope API 返回非预期状态码 (HTTP %d)，响应: %s", resp.StatusCode, string(respBytes))
 	}
 
 	var dsResp dashScopeResponse
 	if err := json.Unmarshal(respBytes, &dsResp); err != nil {
 		log.Printf("[AI] 响应体解析失败，原始内容: %s", string(respBytes))
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("解析 DashScope 响应失败: %w", err)
 	}
 
 	// DashScope 用非空 code 字段表示业务错误（正常时 code 为空）
 	if dsResp.Code != "" {
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
 		return "", fmt.Errorf("DashScope API 错误 (code=%s): %s", dsResp.Code, dsResp.Message)
 	}
 
+	var reply string
 	if len(dsResp.Output.Choices) > 0 {
-		return strings.TrimSpace(dsResp.Output.Choices[0].Message.Content), nil
+		reply = strings.TrimSpace(dsResp.Output.Choices[0].Message.Content)
+	} else if dsResp.Output.Text != "" {
+		// 部分旧版接口直接返回 text 字段
+		reply = strings.TrimSpace(dsResp.Output.Text)
+	} else {
+		log.Printf("[AI] DashScope 响应体无有效内容，原始内容: %s", string(respBytes))
+		if genCtx != nil {
+			genCtx.End(ctx, "", 0, 0)
+		}
+		return "", fmt.Errorf("DashScope API 返回空结果")
 	}
 
-	// 部分旧版接口直接返回 text 字段
-	if dsResp.Output.Text != "" {
-		return strings.TrimSpace(dsResp.Output.Text), nil
+	// 更新Generation
+	if genCtx != nil {
+		inputTokens := CalculateMessagesTokens(messages)
+		outputTokens := CalculateTokens(reply)
+		genCtx.End(ctx, reply, inputTokens, outputTokens)
+		log.Printf("[Langfuse] DashScope请求完成，耗时: %v, 输入token: %d, 输出token: %d", time.Since(startTime), inputTokens, outputTokens)
 	}
 
-	log.Printf("[AI] DashScope 响应体无有效内容，原始内容: %s", string(respBytes))
-	return "", fmt.Errorf("DashScope API 返回空结果")
+	return reply, nil
 }

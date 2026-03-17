@@ -97,10 +97,44 @@ func (a *IntelliAnalyzer) runOneBatch(ctx context.Context) {
 		profileUpdateEvery = 5
 	}
 
+	// 创建 Trace 追踪整个批处理流程
+	traceCtx, err := StartTrace(ctx, "intelli-analyzer-batch", "", map[string]interface{}{
+		"batch_size":           batchSize,
+		"profile_update_every": profileUpdateEvery,
+	})
+	if err != nil {
+		log.Printf("[IntelliAnalyzer] 创建Trace失败: %v", err)
+	}
+
+	// 创建 Span 追踪批处理流程
+	var spanCtx *SpanContext
+	if traceCtx != nil {
+		spanCtx, err = traceCtx.StartSpan(ctx, "batch_processing", map[string]interface{}{
+			"batch_size": batchSize,
+		})
+		if err != nil {
+			log.Printf("[IntelliAnalyzer] 创建Span失败: %v", err)
+		}
+	}
+
+	if spanCtx != nil {
+		defer func() {
+			_ = spanCtx.End(ctx, map[string]interface{}{
+				"status": "completed",
+			})
+		}()
+	}
+
 	// 获取上次分析到的消息 ID
 	lastID, err := a.storage.GetLastAnalyzedMessageID()
 	if err != nil {
 		log.Printf("[IntelliAnalyzer] 读取分析状态失败: %v", err)
+		if spanCtx != nil {
+			_ = spanCtx.End(ctx, map[string]interface{}{
+				"status": "failed",
+				"error":  err.Error(),
+			})
+		}
 		return
 	}
 
@@ -108,11 +142,22 @@ func (a *IntelliAnalyzer) runOneBatch(ctx context.Context) {
 	messages, err := a.storage.GetUnanalyzedMessages(lastID, batchSize)
 	if err != nil {
 		log.Printf("[IntelliAnalyzer] 读取未分析消息失败: %v", err)
+		if spanCtx != nil {
+			_ = spanCtx.End(ctx, map[string]interface{}{
+				"status": "failed",
+				"error":  err.Error(),
+			})
+		}
 		return
 	}
 
 	if len(messages) == 0 {
 		log.Println("[IntelliAnalyzer] 暂无新消息需要分析")
+		if spanCtx != nil {
+			_ = spanCtx.End(ctx, map[string]interface{}{
+				"status": "no_messages",
+			})
+		}
 		return
 	}
 
@@ -162,6 +207,15 @@ func (a *IntelliAnalyzer) analyzeImportance(
 	userProfile string,
 	providerName string,
 ) ([]string, error) {
+	// 创建 Trace 追踪消息重要性分析
+	traceCtx, err := StartTrace(ctx, "intelli-analyzer-importance", "", map[string]interface{}{
+		"message_count": len(messages),
+		"has_profile":   userProfile != "",
+	})
+	if err != nil {
+		log.Printf("[IntelliAnalyzer] 创建Trace失败: %v", err)
+	}
+
 	providerCfg := a.agent.aiConfig().GetProviderConfig(providerName)
 	if providerCfg == nil {
 		return nil, fmt.Errorf("找不到 provider 配置: %s", providerName)
@@ -210,17 +264,32 @@ func (a *IntelliAnalyzer) analyzeImportance(
 		{Role: "user", Content: importanceUserPrompt},
 	}
 
+	// 创建 Generation 追踪 LLM 调用
+	var genCtx *GenerationContext
+	if traceCtx != nil {
+		genCtx, err = traceCtx.StartGeneration(ctx, "analyze_importance_llm", providerCfg.Model, chatMessages)
+		if err != nil {
+			log.Printf("[IntelliAnalyzer] 创建Generation失败: %v", err)
+		}
+	}
+
 	timeout := a.agent.aiConfig().GetEffectiveTimeout(providerCfg)
 	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
 	reply, err := a.agent.doRequest(reqCtx, chatMessages, providerCfg)
 	if err != nil {
+		if genCtx != nil {
+			_ = genCtx.End(ctx, "", 0, 0)
+		}
 		return nil, fmt.Errorf("LLM 请求失败: %w", err)
 	}
 
 	reply = strings.TrimSpace(reply)
 	if reply == "" || strings.EqualFold(reply, "NONE") {
+		if genCtx != nil {
+			_ = genCtx.End(ctx, reply, CalculateMessagesTokens(chatMessages), CalculateTokens(reply))
+		}
 		return nil, nil
 	}
 
@@ -233,6 +302,25 @@ func (a *IntelliAnalyzer) analyzeImportance(
 		}
 		notices = append(notices, line)
 	}
+
+	// 结束 Generation，记录输出和 token 消耗
+	if genCtx != nil {
+		_ = genCtx.End(ctx, reply, CalculateMessagesTokens(chatMessages), CalculateTokens(reply))
+	}
+
+	// 创建结束事件
+	if traceCtx != nil {
+		_, err := GetLangfuseClient().CreateEvent(ctx, traceCtx.TraceID, "analyze_importance_end", map[string]interface{}{
+			"status":        "completed",
+			"notice_count":  len(notices),
+			"input_tokens":  CalculateMessagesTokens(chatMessages),
+			"output_tokens": CalculateTokens(reply),
+		})
+		if err != nil {
+			log.Printf("[IntelliAnalyzer] 创建Event失败: %v", err)
+		}
+	}
+
 	return notices, nil
 }
 
@@ -243,9 +331,26 @@ func (a *IntelliAnalyzer) updateUserProfile(
 	currentProfile string,
 	providerName string,
 ) {
+	// 创建 Trace 追踪画像更新
+	traceCtx, err := StartTrace(ctx, "intelli-analyzer-profile", "", map[string]interface{}{
+		"message_count":   len(messages),
+		"has_old_profile": currentProfile != "",
+	})
+	if err != nil {
+		log.Printf("[IntelliAnalyzer] 创建Trace失败: %v", err)
+	}
+
 	providerCfg := a.agent.aiConfig().GetProviderConfig(providerName)
 	if providerCfg == nil {
 		log.Printf("[IntelliAnalyzer] 更新画像失败：找不到 provider 配置: %s", providerName)
+		if traceCtx != nil {
+			_, err := GetLangfuseClient().CreateEvent(ctx, traceCtx.TraceID, "provider_not_found", map[string]interface{}{
+				"provider": providerName,
+			})
+			if err != nil {
+				log.Printf("[IntelliAnalyzer] 创建Event失败: %v", err)
+			}
+		}
 		return
 	}
 
@@ -291,6 +396,15 @@ func (a *IntelliAnalyzer) updateUserProfile(
 		{Role: "user", Content: profileUserPrompt},
 	}
 
+	// 创建 Generation 追踪 LLM 调用
+	var genCtx *GenerationContext
+	if traceCtx != nil {
+		genCtx, err = traceCtx.StartGeneration(ctx, "update_profile_llm", providerCfg.Model, chatMessages)
+		if err != nil {
+			log.Printf("[IntelliAnalyzer] 创建Generation失败: %v", err)
+		}
+	}
+
 	timeout := a.agent.aiConfig().GetEffectiveTimeout(providerCfg)
 	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
@@ -298,12 +412,23 @@ func (a *IntelliAnalyzer) updateUserProfile(
 	newProfile, err := a.agent.doRequest(reqCtx, chatMessages, providerCfg)
 	if err != nil {
 		log.Printf("[IntelliAnalyzer] 生成个人画像失败: %v", err)
+		if genCtx != nil {
+			_ = genCtx.End(ctx, "", 0, 0)
+		}
 		return
 	}
 
 	newProfile = strings.TrimSpace(newProfile)
 	if newProfile == "" {
+		if genCtx != nil {
+			_ = genCtx.End(ctx, newProfile, CalculateMessagesTokens(chatMessages), CalculateTokens(newProfile))
+		}
 		return
+	}
+
+	// 结束 Generation，记录输出和 token 消耗
+	if genCtx != nil {
+		_ = genCtx.End(ctx, newProfile, CalculateMessagesTokens(chatMessages), CalculateTokens(newProfile))
 	}
 
 	if saveErr := a.storage.SaveUserProfile(newProfile); saveErr != nil {
@@ -312,4 +437,17 @@ func (a *IntelliAnalyzer) updateUserProfile(
 	}
 
 	log.Printf("[IntelliAnalyzer] 个人画像已更新（%d 字）", len([]rune(newProfile)))
+
+	// 创建结束事件
+	if traceCtx != nil {
+		_, err := GetLangfuseClient().CreateEvent(ctx, traceCtx.TraceID, "update_profile_end", map[string]interface{}{
+			"status":         "completed",
+			"profile_length": len([]rune(newProfile)),
+			"input_tokens":   CalculateMessagesTokens(chatMessages),
+			"output_tokens":  CalculateTokens(newProfile),
+		})
+		if err != nil {
+			log.Printf("[IntelliAnalyzer] 创建Event失败: %v", err)
+		}
+	}
 }

@@ -65,6 +65,10 @@
                 <span class="nav-icon">🧠</span>
                 <span class="nav-label">ADK 配置</span>
             </a>
+            <a class="nav-item" data-page="langfuse" onclick="navigateTo('langfuse');return false;" href="#">
+                <span class="nav-icon">📊</span>
+                <span class="nav-label">Langfuse 配置</span>
+            </a>
             <div class="nav-divider"></div>
             <span class="sidebar-section-label">环境监测</span>
             <div class="nav-parent" id="nav-env-parent" onclick="toggleEnvMenu()">
@@ -685,6 +689,107 @@
                 </div>
             </div>
 
+            <!-- Langfuse 配置页 -->
+            <div class="page" id="page-langfuse">
+                <div class="page-header">
+                    <h1>📊 Langfuse 配置</h1>
+                    <p>配置 Langfuse 追踪系统，用于监控和分析 AI 调用性能</p>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">⚙️</span>
+                        <h2>基础配置</h2>
+                        <span class="card-badge" id="langfuse-status-badge">加载中...</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <div class="toggle-row">
+                                <div class="toggle-info">
+                                    <div class="toggle-label">启用 Langfuse 追踪</div>
+                                    <div class="toggle-desc">开启后将自动追踪所有 AI 调用，包括输入输出、Token 消耗、耗时等</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="langfuse-enabled">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="form-group">
+                            <label class="form-label">Public Key</label>
+                            <input type="text" id="langfuse-public-key" placeholder="pk-lf-...">
+                            <div class="form-hint">从 Langfuse 控制台获取的 Public Key</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Secret Key</label>
+                            <input type="password" id="langfuse-secret-key" placeholder="sk-lf-...">
+                            <div class="form-hint">从 Langfuse 控制台获取的 Secret Key</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Base URL</label>
+                            <input type="text" id="langfuse-base-url" placeholder="https://cloud.langfuse.com">
+                            <div class="form-hint">Langfuse 服务端点，使用云服务时保持默认即可</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">⚡</span>
+                        <h2>高级配置</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <div class="toggle-row">
+                                <div class="toggle-info">
+                                    <div class="toggle-label">启用异步批量处理</div>
+                                    <div class="toggle-desc">开启后可提高性能，但会有短暂的延迟（推荐开启）</div>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="langfuse-async-enabled" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="divider"></div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                            <div class="form-group">
+                                <label class="form-label">批量大小</label>
+                                <input type="number" id="langfuse-batch-size" placeholder="100" min="10" max="1000">
+                                <div class="form-hint">每批发送的事件数量</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">刷新间隔（秒）</label>
+                                <input type="number" id="langfuse-flush-interval" placeholder="5" min="1" max="60">
+                                <div class="form-hint">批量数据发送间隔</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🔗</span>
+                        <h2>快速链接</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <a href="https://cloud.langfuse.com" target="_blank" class="btn btn-secondary" style="text-decoration:none;display:inline-block;">
+                                🌐 打开 Langfuse 控制台
+                            </a>
+                            <span style="margin-left:1rem;color:#6b7280;font-size:0.875rem;">
+                                查看追踪数据、分析性能和成本
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-bar">
+                    <button class="btn btn-primary" onclick="saveLangfuseConfig()">💾 保存配置</button>
+                </div>
+            </div>
+
         </div><!-- /.main -->
     </div><!-- /.layout -->
 
@@ -708,6 +813,7 @@
     <script src="/static/page-camera.js"></script>
     <script src="/static/page-skin.js"></script>
     <script src="/static/page-adk.js"></script>
+    <script src="/static/page-langfuse.js"></script>
     <script src="/static/settings.js"></script>
 </body>
 </html>

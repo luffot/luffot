@@ -27,6 +27,9 @@ type AppConfig struct {
 	// AI 配置
 	AI AIConfig `yaml:"ai" json:"ai"`
 
+	// Langfuse 配置
+	Langfuse LangfuseConfig `yaml:"langfuse" json:"langfuse"`
+
 	// 告警配置
 	Alert AlertConfig `yaml:"alert" json:"alert"`
 
@@ -236,6 +239,28 @@ type AIProviderConfig struct {
 
 	// 请求超时秒数（覆盖全局 timeout_seconds，0 表示使用全局配置）
 	TimeoutSeconds int `yaml:"timeout_seconds" json:"timeout_seconds"`
+}
+
+// LangfuseConfig Langfuse 配置
+type LangfuseConfig struct {
+	// 是否启用 Langfuse 追踪
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// Langfuse Public Key
+	PublicKey string `yaml:"public_key" json:"public_key"`
+
+	// Langfuse Secret Key
+	SecretKey string `yaml:"secret_key" json:"secret_key"`
+
+	// Langfuse Base URL，默认为 https://cloud.langfuse.com
+	BaseURL string `yaml:"base_url" json:"base_url"`
+
+	// 是否启用异步批量处理（高性能模式）
+	AsyncEnabled bool `yaml:"async_enabled" json:"async_enabled"`
+
+	// 批量处理配置
+	BatchSize     int `yaml:"batch_size" json:"batch_size"`         // 批量大小，默认100
+	FlushInterval int `yaml:"flush_interval" json:"flush_interval"` // 刷新间隔（秒），默认5
 }
 
 // AIConfig AI 智能体配置
@@ -836,6 +861,21 @@ func GetReactiveAIConfig() ReactiveAIConfig {
 func UpdateReactiveAIConfig(cfg ReactiveAIConfig) error {
 	configMutex.Lock()
 	configInstance.ReactiveAI = cfg
+	configMutex.Unlock()
+	return Save()
+}
+
+// GetLangfuseConfig 获取Langfuse配置（线程安全）
+func GetLangfuseConfig() LangfuseConfig {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return configInstance.Langfuse
+}
+
+// UpdateLangfuseConfig 更新Langfuse配置并持久化
+func UpdateLangfuseConfig(cfg LangfuseConfig) error {
+	configMutex.Lock()
+	configInstance.Langfuse = cfg
 	configMutex.Unlock()
 	return Save()
 }

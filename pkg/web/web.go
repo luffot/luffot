@@ -75,6 +75,7 @@ func (s *Server) initRoutes() {
 	http.HandleFunc("/api/skin", s.handleSkinAPI)
 	http.HandleFunc("/api/skin/import", s.handleSkinImportAPI)
 	http.HandleFunc("/api/adk/config", s.handleADKConfigAPI)
+	http.HandleFunc("/api/langfuse-config", s.handleLangfuseConfigAPI)
 	http.Handle("/static/", http.StripPrefix("/static/", mimeAwareFSServer(s.staticFS)))
 	// 提供告警截图的静态文件访问（/captures/{filename}）
 	http.Handle("/captures/", http.StripPrefix("/captures/", http.FileServer(http.Dir(capturesDir))))
@@ -835,6 +836,31 @@ func (s *Server) handleADKConfigAPI(w http.ResponseWriter, r *http.Request) {
 		}
 
 		respondJSON(w, http.StatusOK, map[string]string{"message": "ADK 配置保存成功"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleLangfuseConfigAPI Langfuse 配置 API（GET 读取，PUT 保存）
+func (s *Server) handleLangfuseConfigAPI(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+
+	switch r.Method {
+	case "GET":
+		respondJSON(w, http.StatusOK, config.GetLangfuseConfig())
+
+	case "PUT":
+		var langfuseCfg config.LangfuseConfig
+		if err := json.NewDecoder(r.Body).Decode(&langfuseCfg); err != nil {
+			respondJSON(w, http.StatusBadRequest, map[string]string{"error": "无效的请求体"})
+			return
+		}
+		if err := config.UpdateLangfuseConfig(langfuseCfg); err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]string{"message": "Langfuse 配置保存成功，重启后生效"})
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

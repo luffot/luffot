@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -141,6 +142,32 @@ func (cp *CameraPatrol) patrolLoop() {
 
 // performDetection 执行检测
 func (cp *CameraPatrol) performDetection() {
+	ctx := context.Background()
+
+	// 开始Trace追踪整个检测流程
+	traceCtx, err := StartTrace(ctx, "camera-patrol-analysis", "", map[string]interface{}{
+		"component": "camera_patrol",
+	})
+	if err != nil {
+		log.Printf("[CameraPatrol] 创建Langfuse Trace失败: %v", err)
+	}
+
+	// 开始Span追踪检测流程
+	spanCtx, err := traceCtx.StartSpan(ctx, "detection-flow", map[string]interface{}{
+		"action": "perform_detection",
+	})
+	if err != nil {
+		log.Printf("[CameraPatrol] 创建Langfuse Span失败: %v", err)
+	}
+
+	defer func() {
+		if spanCtx != nil {
+			spanCtx.End(ctx, map[string]interface{}{
+				"status": "completed",
+			})
+		}
+	}()
+
 	// 检查摄像头权限
 	if !camera.HasPermission() {
 		log.Println("[CameraPatrol] 无摄像头权限，跳过检测")
@@ -169,13 +196,13 @@ func (cp *CameraPatrol) performDetection() {
 
 	// 使用AI分析图像
 	if cp.agent != nil && cp.agent.IsEnabled() {
-		result := cp.analyzeWithAI(base64JPEG)
+		result := cp.analyzeWithAI(ctx, traceCtx, base64JPEG)
 		cp.processDetectionResult(result)
 	}
 }
 
 // analyzeWithAI 使用AI分析图像
-func (cp *CameraPatrol) analyzeWithAI(base64JPEG string) *DetectionResult {
+func (cp *CameraPatrol) analyzeWithAI(ctx context.Context, traceCtx *TraceContext, base64JPEG string) *DetectionResult {
 	prompt := `分析这张图片，回答以下问题：
 1. 图片中是否有人？（YES/NO）
 2. 有几个人？
@@ -188,11 +215,53 @@ PERSON_COUNT: 数字
 HAS_MOVEMENT: YES/NO
 DESCRIPTION: 场景描述`
 
+	// 获取模型信息
+	modelName := "unknown"
+	if cp.agent != nil {
+		providerCfg := cp.agent.aiConfig().GetProviderConfig("")
+		if providerCfg != nil {
+			modelName = providerCfg.Model
+		}
+	}
+
+	// 开始Generation追踪LLM调用
+	genCtx, err := traceCtx.StartGeneration(ctx, "image-analysis", modelName, []ChatMessage{
+		{
+			Role:    "user",
+			Content: prompt,
+		},
+	})
+	if err != nil {
+		log.Printf("[CameraPatrol] 创建Langfuse Generation失败: %v", err)
+	}
+
+	// 记录输入信息
+	inputTokens := CalculateTokens(prompt)
+	imageSize := len(base64JPEG)
+
+	startTime := time.Now()
+
 	result, err := cp.agent.AnalyzeImageBase64(base64JPEG, prompt, "")
+
+	duration := time.Since(startTime)
+
 	if err != nil {
 		log.Printf("[CameraPatrol] AI分析失败: %v", err)
+		if genCtx != nil {
+			genCtx.End(ctx, "", inputTokens, 0)
+		}
 		return nil
 	}
+
+	// 结束Generation记录输出
+	outputTokens := CalculateTokens(result)
+	if genCtx != nil {
+		genCtx.End(ctx, result, inputTokens, outputTokens)
+	}
+
+	// 记录到Trace的metadata中
+	log.Printf("[CameraPatrol] 图像分析完成 - 模型: %s, 图像大小: %d bytes, 耗时: %v, 输入tokens: %d, 输出tokens: %d",
+		modelName, imageSize, duration, inputTokens, outputTokens)
 
 	return cp.parseAIResult(result)
 }
