@@ -30,6 +30,10 @@ const (
 	AppMessageReceived EventType = "app.message_received"
 	// AppMessageUrgent 收到紧急消息
 	AppMessageUrgent EventType = "app.message_urgent"
+	// AppMessageBatchReport 批量消息汇报
+	AppMessageBatchReport EventType = "app.message_batch_report"
+	// AppMessageImmediateReport 立即消息汇报
+	AppMessageImmediateReport EventType = "app.message_immediate_report"
 	// AppMeetingStarted 会议开始
 	AppMeetingStarted EventType = "app.meeting_started"
 	// AppMeetingEnded 会议结束

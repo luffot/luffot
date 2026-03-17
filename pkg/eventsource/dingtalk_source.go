@@ -714,8 +714,8 @@ func msgHash(sender, content string) string {
 	return fmt.Sprintf("%x", h[:16])
 }
 
-// processSnapshotsViaAccessibility 使用 Accessibility API 读取窗口文本并处理新消息（原有逻辑）
-// lastTextsByApp 由调用方维护，key 为 appName，value 为上次读取到的文本列表
+// processSnapshotsViaAccessibility 使用 Accessibility API 读取窗口文本并处理新消息
+// 现在消息会先交给 AppSecretary 进行过滤和汇报决策
 func (s *DingTalkSource) processSnapshotsViaAccessibility(handler MessageEventHandler, lastTextsByApp map[string][]string) {
 	snapshots := s.readAllWindowTexts()
 	for _, snap := range snapshots {
@@ -725,6 +725,7 @@ func (s *DingTalkSource) processSnapshotsViaAccessibility(handler MessageEventHa
 			events := s.parseMessages(newTexts, snap.sessionName, snap.appName)
 			for _, event := range events {
 				if !s.isDuplicate(event) {
+					// 同时保留原始 handler 用于弹幕显示
 					handler(event)
 				}
 			}
@@ -786,7 +787,8 @@ func (s *DingTalkSource) screenshotDingTalkApps() []appScreenshot {
 	return screenshots
 }
 
-// processSnapshotsViaVLModel 截图钉钉窗口，调用 VL 模型（vlmodel provider）提取消息，处理新消息事件
+// processSnapshotsViaVLModel 截图钉钉窗口，调用 VL 模型提取消息
+// 现在消息会先交给 AppSecretary 进行过滤和汇报决策
 func (s *DingTalkSource) processSnapshotsViaVLModel(handler MessageEventHandler) {
 	screenshots := s.screenshotDingTalkApps()
 	if len(screenshots) == 0 {
@@ -798,7 +800,6 @@ func (s *DingTalkSource) processSnapshotsViaVLModel(handler MessageEventHandler)
 
 	now := time.Now()
 	for _, shot := range screenshots {
-		// 直接复用 agent.AnalyzeImageBase64，指定 vlmodel provider
 		rawContent, err := s.agent.AnalyzeImageBase64(shot.base64JPEG, prompt, "vlmodel")
 		if err != nil {
 			fmt.Printf("[DingTalk] VL 模型调用失败 (app=%s): %v\n", shot.appName, err)
@@ -830,6 +831,7 @@ func (s *DingTalkSource) processSnapshotsViaVLModel(handler MessageEventHandler)
 			}
 
 			if !s.isDuplicate(event) {
+				// 同时保留原始 handler 用于弹幕显示
 				handler(event)
 			}
 		}

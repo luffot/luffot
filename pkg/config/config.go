@@ -71,6 +71,44 @@ type ReactiveAIConfig struct {
 
 	// 协调器洞察生成间隔（秒），默认60
 	CoordinatorInterval int `yaml:"coordinator_interval" json:"coordinator_interval"`
+
+	// AI 丞相汇报策略配置
+	CoordinatorStrategy *CoordinatorReportStrategy `yaml:"coordinator_strategy" json:"coordinator_strategy"`
+
+	// 应用秘书汇报策略配置
+	SecretaryStrategy *SecretaryReportStrategy `yaml:"secretary_strategy" json:"secretary_strategy"`
+}
+
+// CoordinatorReportStrategy AI 丞相汇报策略配置
+type CoordinatorReportStrategy struct {
+	// 是否启用 AI 总结
+	EnableAISummary bool `yaml:"enable_ai_summary" json:"enable_ai_summary"`
+	// 最小汇报间隔（秒）
+	MinReportInterval int `yaml:"min_report_interval" json:"min_report_interval"`
+	// 最大连续汇报次数（防刷屏）
+	MaxConsecutiveReports int `yaml:"max_consecutive_reports" json:"max_consecutive_reports"`
+	// 连续汇报冷却时间（秒）
+	ConsecutiveCooldown int `yaml:"consecutive_cooldown" json:"consecutive_cooldown"`
+	// 高优先级事件立即汇报
+	UrgentImmediate bool `yaml:"urgent_immediate" json:"urgent_immediate"`
+	// 批量事件聚合窗口（秒）
+	BatchWindow int `yaml:"batch_window" json:"batch_window"`
+}
+
+// SecretaryReportStrategy 应用秘书汇报策略配置
+type SecretaryReportStrategy struct {
+	// 是否启用 AI 总结
+	EnableAISummary bool `yaml:"enable_ai_summary" json:"enable_ai_summary"`
+	// 紧急消息立即汇报
+	UrgentImmediate bool `yaml:"urgent_immediate" json:"urgent_immediate"`
+	// 普通消息批量汇报间隔（秒）
+	BatchInterval int `yaml:"batch_interval" json:"batch_interval"`
+	// 最小汇报优先级（low/normal/high/urgent）
+	MinReportPriority string `yaml:"min_report_priority" json:"min_report_priority"`
+	// 同一发送者消息合并
+	MergeSameSender bool `yaml:"merge_same_sender" json:"merge_same_sender"`
+	// 会话去重（同一会话只汇报最新）
+	SessionDeduplicate bool `yaml:"session_deduplicate" json:"session_deduplicate"`
 }
 
 // ScheduledTasksConfig 定时任务总配置

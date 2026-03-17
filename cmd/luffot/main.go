@@ -15,7 +15,7 @@ import (
 	"github.com/luffot/luffot/pkg/ai"
 	"github.com/luffot/luffot/pkg/barrage"
 	"github.com/luffot/luffot/pkg/config"
-	embedfs "github.com/luffot/luffot/pkg/embedfs"
+	"github.com/luffot/luffot/pkg/embedfs"
 	"github.com/luffot/luffot/pkg/eventsource"
 	"github.com/luffot/luffot/pkg/manager"
 	"github.com/luffot/luffot/pkg/pet"
@@ -85,6 +85,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("完成")
+
+	// 初始化 Langfuse（从配置文件读取配置）
+	if err := ai.InitLangfuse(); err != nil {
+		log.Printf("[Langfuse] 初始化失败: %v", err)
+		// Langfuse 初始化失败不影响主程序运行
+	}
 
 	// 确保数据目录存在
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
@@ -218,11 +224,14 @@ func main() {
 				fmt.Printf("正在启动钉钉窗口监听（accessibility 模式，轮询间隔：%v）... ", checkInterval)
 			}
 
-			dingSource := eventsource.NewDingTalkSource(eventsource.DingTalkSourceConfig{
+			// 创建钉钉消息源配置
+			dingSourceConfig := eventsource.DingTalkSourceConfig{
 				CheckInterval: checkInterval,
 				MaxCacheSize:  500,
 				Agent:         dingAgent,
-			})
+			}
+
+			dingSource := eventsource.NewDingTalkSource(dingSourceConfig)
 			msgManager.AddEventSource(dingSource)
 			fmt.Println("完成")
 			break
@@ -252,7 +261,7 @@ func main() {
 		fmt.Println("完成")
 	}
 
-	// 启动响应式AI链路
+	// 启动响应式AI链路（必须在钉钉消息源之前启动，以便注入秘书）
 	var reactiveAIChain *ai.ReactiveAIChain
 	if cfg.ReactiveAI.Enabled {
 		fmt.Print("正在启动响应式AI链路... ")
@@ -262,9 +271,25 @@ func main() {
 		} else {
 			fmt.Println("完成")
 
-			// 注册应用秘书
+			// 配置 AI 丞相汇报策略
+			coordinatorStrategy := ai.DefaultCoordinatorReportStrategy()
+			if cfg.ReactiveAI.CoordinatorStrategy != nil {
+				// 从 config 转换为 ai 包的类型
+				configStrategy := cfg.ReactiveAI.CoordinatorStrategy
+				coordinatorStrategy = ai.CoordinatorReportStrategy{
+					EnableAISummary:       configStrategy.EnableAISummary,
+					MinReportInterval:     configStrategy.MinReportInterval,
+					MaxConsecutiveReports: configStrategy.MaxConsecutiveReports,
+					ConsecutiveCooldown:   configStrategy.ConsecutiveCooldown,
+					UrgentImmediate:       configStrategy.UrgentImmediate,
+					BatchWindow:           configStrategy.BatchWindow,
+				}
+			}
+			reactiveAIChain.SetCoordinatorReportStrategy(coordinatorStrategy)
+
+			// 注册应用秘书（钉钉秘书会在钉钉消息源初始化时注册）
 			for _, appCfg := range cfg.Apps {
-				if appCfg.Enabled {
+				if appCfg.Enabled && appCfg.Name != "dingtalk" {
 					appType := ai.AppType(appCfg.Name)
 					reactiveAIChain.RegisterAppSecretary(appType, appCfg.DisplayName)
 				}

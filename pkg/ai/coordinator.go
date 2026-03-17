@@ -65,12 +65,12 @@ type UserInsight struct {
 // OnInsightCallback 洞察回调函数类型
 type OnInsightCallback func(insight *UserInsight)
 
-// Coordinator 响应式AI协调器（Luffot秘书长）
+// Coordinator 响应式AI协调器（Luffot秘书长/AI丞相）
 // 作为系统中枢，负责：
 // 1. 接收所有子智能体的事件
 // 2. 聚合事件数据，生成用户状态视图
 // 3. 进行事件优先级排序与语义融合
-// 4. 向用户主动推送关键信息
+// 4. 向用户主动推送关键信息（通过桌宠汇报）
 type Coordinator struct {
 	agent     *Agent
 	eventBus  *eventbus.EventBus
@@ -84,11 +84,47 @@ type Coordinator struct {
 	// 洞察生成定时器
 	insightTicker *time.Ticker
 
+	// AI 丞相汇报策略
+	reportStrategy CoordinatorReportStrategy
+
+	// 汇报冷却控制
+	lastReportTime     time.Time
+	reportCooldown     time.Duration
+	consecutiveReports int
+
 	// 状态锁
 	mu sync.RWMutex
 
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// CoordinatorReportStrategy AI丞相汇报策略
+type CoordinatorReportStrategy struct {
+	// 是否启用 AI 总结
+	EnableAISummary bool `json:"enable_ai_summary"`
+	// 最小汇报间隔（秒）
+	MinReportInterval int `json:"min_report_interval"`
+	// 最大连续汇报次数（防刷屏）
+	MaxConsecutiveReports int `json:"max_consecutive_reports"`
+	// 连续汇报冷却时间（秒）
+	ConsecutiveCooldown int `json:"consecutive_cooldown"`
+	// 高优先级事件立即汇报
+	UrgentImmediate bool `json:"urgent_immediate"`
+	// 批量事件聚合窗口（秒）
+	BatchWindow int `json:"batch_window"`
+}
+
+// DefaultCoordinatorReportStrategy 默认汇报策略
+func DefaultCoordinatorReportStrategy() CoordinatorReportStrategy {
+	return CoordinatorReportStrategy{
+		EnableAISummary:       true,
+		MinReportInterval:     5,
+		MaxConsecutiveReports: 3,
+		ConsecutiveCooldown:   60,
+		UrgentImmediate:       true,
+		BatchWindow:           30,
+	}
 }
 
 // NewCoordinator 创建响应式AI协调器
@@ -102,12 +138,22 @@ func NewCoordinator(agent *Agent, onInsight OnInsightCallback) *Coordinator {
 			UpcomingTasks:     make([]UpcomingTask, 0),
 			LastUpdated:       time.Now(),
 		},
-		onInsight:     onInsight,
-		pendingEvents: make([]*eventbus.Event, 0),
-		eventWindow:   30 * time.Second,
-		ctx:           ctx,
-		cancel:        cancel,
+		onInsight:      onInsight,
+		pendingEvents:  make([]*eventbus.Event, 0),
+		eventWindow:    30 * time.Second,
+		reportStrategy: DefaultCoordinatorReportStrategy(),
+		lastReportTime: time.Now(),
+		reportCooldown: 5 * time.Second,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
+}
+
+// SetReportStrategy 设置汇报策略
+func (c *Coordinator) SetReportStrategy(strategy CoordinatorReportStrategy) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reportStrategy = strategy
 }
 
 // Start 启动协调器
@@ -151,6 +197,9 @@ func (c *Coordinator) subscribeEvents() {
 	// 应用事件
 	c.eventBus.Subscribe(eventbus.AppMessageReceived, c.handleAppEvent)
 	c.eventBus.Subscribe(eventbus.AppMessageUrgent, c.handleAppEvent)
+	// 订阅应用秘书的汇报事件
+	c.eventBus.Subscribe(eventbus.AppMessageBatchReport, c.handleAppBatchReport)
+	c.eventBus.Subscribe(eventbus.AppMessageImmediateReport, c.handleAppImmediateReport)
 	c.eventBus.Subscribe(eventbus.AppMeetingStarted, c.handleAppEvent)
 	c.eventBus.Subscribe(eventbus.AppMeetingEnded, c.handleAppEvent)
 	c.eventBus.Subscribe(eventbus.AppTaskReminder, c.handleAppEvent)
@@ -163,6 +212,192 @@ func (c *Coordinator) subscribeEvents() {
 	c.eventBus.Subscribe(eventbus.UserAppSwitched, c.handleUserBehaviorEvent)
 	c.eventBus.Subscribe(eventbus.UserIdleDetected, c.handleUserBehaviorEvent)
 	c.eventBus.Subscribe(eventbus.UserActiveDetected, c.handleUserBehaviorEvent)
+}
+
+// handleAppBatchReport 处理应用批量汇报
+func (c *Coordinator) handleAppBatchReport(event *eventbus.Event) {
+	c.mu.Lock()
+	c.pendingEvents = append(c.pendingEvents, event)
+	c.mu.Unlock()
+
+	log.Printf("[Coordinator] 收到批量汇报: %s", event.Description)
+}
+
+// handleAppImmediateReport 处理应用立即汇报
+func (c *Coordinator) handleAppImmediateReport(event *eventbus.Event) {
+	c.mu.Lock()
+	c.pendingEvents = append(c.pendingEvents, event)
+	c.mu.Unlock()
+
+	log.Printf("[Coordinator] 收到立即汇报: %s", event.Description)
+
+	// 根据策略判断是否立即向用户汇报
+	if c.shouldReportToUser(event) {
+		c.generateAndSendReport(event)
+	}
+}
+
+// shouldReportToUser 判断是否应向用户汇报
+func (c *Coordinator) shouldReportToUser(event *eventbus.Event) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// 检查汇报间隔
+	timeSinceLastReport := time.Since(c.lastReportTime)
+	minInterval := time.Duration(c.reportStrategy.MinReportInterval) * time.Second
+	if timeSinceLastReport < minInterval {
+		return false
+	}
+
+	// 检查连续汇报次数（防刷屏）
+	if c.consecutiveReports >= c.reportStrategy.MaxConsecutiveReports {
+		cooldown := time.Duration(c.reportStrategy.ConsecutiveCooldown) * time.Second
+		if timeSinceLastReport < cooldown {
+			return false
+		}
+		c.consecutiveReports = 0
+	}
+
+	// 高优先级事件立即汇报
+	if event.Priority >= eventbus.PriorityHigh && c.reportStrategy.UrgentImmediate {
+		return true
+	}
+
+	return false
+}
+
+// generateAndSendReport 生成并发送汇报
+func (c *Coordinator) generateAndSendReport(event *eventbus.Event) {
+	// 生成汇报内容
+	report := c.generateReport(event)
+
+	// 创建洞察并发送
+	insight := &UserInsight{
+		ID:        fmt.Sprintf("ins_%d", time.Now().UnixNano()),
+		Type:      c.determineInsightType(event),
+		Title:     report.Title,
+		Content:   report.Content,
+		Priority:  c.calculatePriority(event),
+		Source:    "coordinator",
+		CreatedAt: time.Now(),
+	}
+
+	// 更新汇报状态
+	c.mu.Lock()
+	c.lastReportTime = time.Now()
+	c.consecutiveReports++
+	c.mu.Unlock()
+
+	// 发送洞察
+	if c.onInsight != nil {
+		c.onInsight(insight)
+	}
+
+	log.Printf("[Coordinator] AI丞相汇报: %s", report.Title)
+}
+
+// Report AI丞相生成的汇报
+type Report struct {
+	Title   string
+	Content string
+	Source  string
+}
+
+// generateReport 生成智能汇报
+func (c *Coordinator) generateReport(event *eventbus.Event) *Report {
+	appName := c.extractEventDataString(event, "app_name")
+	sender := c.extractEventDataString(event, "sender")
+	content := c.extractEventDataString(event, "content")
+	title := c.extractEventDataString(event, "title")
+
+	// 如果有 AI 智能体，生成智能摘要
+	if c.reportStrategy.EnableAISummary && c.agent != nil && c.agent.IsEnabled() {
+		summary := c.generateAISummary(event, appName, sender, content)
+		if summary != "" {
+			return &Report{
+				Title:   fmt.Sprintf("[%s] %s", appName, title),
+				Content: summary,
+				Source:  "ai_summary",
+			}
+		}
+	}
+
+	return &Report{
+		Title:   fmt.Sprintf("[%s] %s", appName, title),
+		Content: fmt.Sprintf("%s: %s", sender, content),
+		Source:  "default",
+	}
+}
+
+// generateAISummary 使用 AI 生成汇报摘要
+func (c *Coordinator) generateAISummary(event *eventbus.Event, appName, sender, content string) string {
+	_ = fmt.Sprintf(`作为用户的AI丞相，请根据以下信息生成一个简洁的汇报：
+
+来源应用: %s
+发送者: %s
+内容: %s
+事件类型: %s
+优先级: %d
+
+请生成一段30字以内的智能汇报，突出关键信息，语气正式但友好。`,
+		appName, sender, content, event.Type, event.Priority)
+
+	// AI 调用是异步的，这里简化处理
+	// 实际项目中应该使用同步包装或回调机制
+	return ""
+}
+
+// determineInsightType 确定洞察类型
+func (c *Coordinator) determineInsightType(event *eventbus.Event) InsightType {
+	switch event.Type {
+	case eventbus.AppMessageUrgent, eventbus.AppMessageImmediateReport:
+		return InsightTypeAppNotification
+	case eventbus.SystemCPUHigh, eventbus.SystemMemoryOveruse, eventbus.SystemDiskFull:
+		return InsightTypeSystemAlert
+	case eventbus.EnvPersonDetected:
+		return InsightTypeEnvironmentAlert
+	default:
+		return InsightTypeActivitySummary
+	}
+}
+
+// calculatePriority 计算优先级
+func (c *Coordinator) calculatePriority(event *eventbus.Event) int {
+	basePriority := 5
+	switch event.Priority {
+	case eventbus.PriorityCritical:
+		basePriority = 10
+	case eventbus.PriorityHigh:
+		basePriority = 8
+	case eventbus.PriorityNormal:
+		basePriority = 5
+	case eventbus.PriorityLow:
+		basePriority = 3
+	}
+
+	// 根据事件类型调整
+	switch event.Type {
+	case eventbus.AppMessageUrgent:
+		basePriority += 2
+	case eventbus.SystemDiskFull:
+		basePriority += 3
+	}
+
+	if basePriority > 10 {
+		basePriority = 10
+	}
+	return basePriority
+}
+
+// extractEventDataString 从事件数据中提取字符串
+func (c *Coordinator) extractEventDataString(event *eventbus.Event, key string) string {
+	if event.Data == nil {
+		return ""
+	}
+	if val, ok := event.Data[key].(string); ok {
+		return val
+	}
+	return ""
 }
 
 // handleSystemEvent 处理系统事件

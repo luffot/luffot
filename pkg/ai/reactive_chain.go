@@ -306,7 +306,22 @@ func (rac *ReactiveAIChain) IsCameraPatrolEnabled() bool {
 
 // RegisterAppSecretary 注册应用秘书
 func (rac *ReactiveAIChain) RegisterAppSecretary(appType AppType, appName string) *AppSecretary {
-	return rac.appSecretaryMgr.RegisterSecretary(appType, appName)
+	sec := rac.appSecretaryMgr.RegisterSecretary(appType, appName)
+	// 注入 AI 智能体
+	if rac.agent != nil {
+		sec.SetAgent(rac.agent)
+	}
+	return sec
+}
+
+// RegisterDingTalkSecretary 注册钉钉消息秘书（专用方法）
+func (rac *ReactiveAIChain) RegisterDingTalkSecretary() *AppSecretary {
+	return rac.RegisterAppSecretary(AppTypeDingTalk, "钉钉")
+}
+
+// GetAppSecretaryManager 获取应用秘书管理器
+func (rac *ReactiveAIChain) GetAppSecretaryManager() *AppSecretaryManager {
+	return rac.appSecretaryMgr
 }
 
 // IsRunning 检查是否运行中
@@ -319,6 +334,21 @@ func (rac *ReactiveAIChain) IsRunning() bool {
 // GetCoordinator 获取协调器（供外部访问）
 func (rac *ReactiveAIChain) GetCoordinator() *Coordinator {
 	return rac.coordinator
+}
+
+// SetCoordinatorReportStrategy 设置 AI 丞相汇报策略
+func (rac *ReactiveAIChain) SetCoordinatorReportStrategy(strategy CoordinatorReportStrategy) {
+	if rac.coordinator != nil {
+		rac.coordinator.SetReportStrategy(strategy)
+	}
+}
+
+// SetAppSecretaryReportStrategy 设置应用秘书汇报策略
+func (rac *ReactiveAIChain) SetAppSecretaryReportStrategy(appType AppType, strategy ReportStrategy) {
+	sec := rac.appSecretaryMgr.GetSecretary(appType)
+	if sec != nil {
+		sec.SetReportStrategy(strategy)
+	}
 }
 
 // GetUserTracker 获取用户跟踪器（供外部访问）

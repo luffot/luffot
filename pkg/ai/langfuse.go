@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/AEKurt/langfuse-go"
+	"github.com/luffot/luffot/pkg/config"
 )
 
 // LangfuseClient Langfuse客户端封装
@@ -25,25 +25,43 @@ var (
 	globalLangfuse *LangfuseClient
 )
 
-// InitLangfuse 初始化Langfuse客户端
+// InitLangfuse 初始化Langfuse客户端（从配置文件读取配置）
 func InitLangfuse() error {
-	publicKey := os.Getenv("LANGFUSE_PUBLIC_KEY")
-	secretKey := os.Getenv("LANGFUSE_SECRET_KEY")
-	baseURL := os.Getenv("LANGFUSE_BASE_URL")
+	langfuseCfg := config.GetLangfuseConfig()
 
-	if publicKey == "" || secretKey == "" {
-		log.Println("[Langfuse] 未配置LANGFUSE_PUBLIC_KEY或LANGFUSE_SECRET_KEY，Langfuse追踪已禁用")
+	// 如果未启用，创建禁用状态的客户端
+	if !langfuseCfg.Enabled {
+		log.Println("[Langfuse] 配置中未启用 Langfuse，追踪功能已禁用")
 		globalLangfuse = &LangfuseClient{enabled: false}
 		return nil
 	}
 
+	// 检查必要配置
+	if langfuseCfg.PublicKey == "" || langfuseCfg.SecretKey == "" {
+		log.Println("[Langfuse] 配置中缺少 PublicKey 或 SecretKey，Langfuse 追踪已禁用")
+		globalLangfuse = &LangfuseClient{enabled: false}
+		return nil
+	}
+
+	// 设置默认值
+	baseURL := langfuseCfg.BaseURL
 	if baseURL == "" {
 		baseURL = "https://cloud.langfuse.com"
 	}
 
+	// 设置批量配置默认值
+	batchSize := langfuseCfg.BatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+	flushInterval := langfuseCfg.FlushInterval
+	if flushInterval <= 0 {
+		flushInterval = 5
+	}
+
 	client, err := langfuse.NewClient(langfuse.Config{
-		PublicKey: publicKey,
-		SecretKey: secretKey,
+		PublicKey: langfuseCfg.PublicKey,
+		SecretKey: langfuseCfg.SecretKey,
 		BaseURL:   baseURL,
 	})
 	if err != nil {
@@ -53,13 +71,13 @@ func InitLangfuse() error {
 	// 创建异步客户端用于高性能批量处理
 	asyncClient, err := langfuse.NewAsyncClient(
 		langfuse.Config{
-			PublicKey: publicKey,
-			SecretKey: secretKey,
+			PublicKey: langfuseCfg.PublicKey,
+			SecretKey: langfuseCfg.SecretKey,
 			BaseURL:   baseURL,
 		},
 		langfuse.BatchConfig{
-			MaxBatchSize:    100,
-			FlushInterval:   5 * time.Second,
+			MaxBatchSize:    batchSize,
+			FlushInterval:   time.Duration(flushInterval) * time.Second,
 			MaxRetries:      3,
 			ShutdownTimeout: 30 * time.Second,
 			OnError: func(err error, events []langfuse.BatchEvent) {
@@ -75,8 +93,8 @@ func InitLangfuse() error {
 		client:      client,
 		asyncClient: asyncClient,
 		enabled:     true,
-		publicKey:   publicKey,
-		secretKey:   secretKey,
+		publicKey:   langfuseCfg.PublicKey,
+		secretKey:   langfuseCfg.SecretKey,
 		baseURL:     baseURL,
 	}
 
@@ -108,8 +126,11 @@ func (lc *LangfuseClient) Shutdown() error {
 // CreateTrace 创建Trace（追踪根节点）
 func (lc *LangfuseClient) CreateTrace(ctx context.Context, name string, userID string, metadata map[string]interface{}) (*langfuse.TraceResponse, error) {
 	if !lc.IsEnabled() {
+		log.Printf("[Langfuse] CreateTrace 被调用但客户端未启用")
 		return nil, nil
 	}
+
+	log.Printf("[Langfuse] CreateTrace 开始: name=%s, userID=%s", name, userID)
 
 	now := time.Now()
 	trace, err := lc.client.CreateTrace(ctx, langfuse.Trace{
@@ -119,8 +140,10 @@ func (lc *LangfuseClient) CreateTrace(ctx context.Context, name string, userID s
 		Timestamp: &now,
 	})
 	if err != nil {
+		log.Printf("[Langfuse] CreateTrace 失败: %v", err)
 		return nil, fmt.Errorf("创建Trace失败: %w", err)
 	}
+	log.Printf("[Langfuse] CreateTrace 成功: traceID=%s", trace.ID)
 	return trace, nil
 }
 
@@ -177,8 +200,11 @@ func (lc *LangfuseClient) UpdateSpan(ctx context.Context, spanID string, output 
 // CreateGeneration 创建Generation（LLM调用）
 func (lc *LangfuseClient) CreateGeneration(ctx context.Context, traceID string, name string, model string, messages []ChatMessage) (*langfuse.GenerationResponse, error) {
 	if !lc.IsEnabled() {
+		log.Printf("[Langfuse] CreateGeneration 被调用但客户端未启用")
 		return nil, nil
 	}
+
+	log.Printf("[Langfuse] CreateGeneration 开始: traceID=%s, name=%s, model=%s, messagesCount=%d", traceID, name, model, len(messages))
 
 	// 转换消息格式
 	inputMessages := make([]map[string]interface{}, len(messages))
@@ -200,16 +226,21 @@ func (lc *LangfuseClient) CreateGeneration(ctx context.Context, traceID string, 
 		},
 	})
 	if err != nil {
+		log.Printf("[Langfuse] CreateGeneration 失败: %v", err)
 		return nil, fmt.Errorf("创建Generation失败: %w", err)
 	}
+	log.Printf("[Langfuse] CreateGeneration 成功: generationID=%s", generation.ID)
 	return generation, nil
 }
 
 // UpdateGeneration 更新Generation（记录输出、token消耗等）
 func (lc *LangfuseClient) UpdateGeneration(ctx context.Context, generationID string, output string, usage *langfuse.Usage) (*langfuse.GenerationResponse, error) {
 	if !lc.IsEnabled() {
+		log.Printf("[Langfuse] UpdateGeneration 被调用但客户端未启用")
 		return nil, nil
 	}
+
+	log.Printf("[Langfuse] UpdateGeneration 开始: generationID=%s, outputLen=%d", generationID, len(output))
 
 	now := time.Now()
 
@@ -230,12 +261,15 @@ func (lc *LangfuseClient) UpdateGeneration(ctx context.Context, generationID str
 
 	if usage != nil {
 		update.Usage = usage
+		log.Printf("[Langfuse] UpdateGeneration usage: input=%d, output=%d, total=%d", usage.Input, usage.Output, usage.Total)
 	}
 
 	generation, err := lc.client.UpdateGeneration(ctx, generationID, update)
 	if err != nil {
+		log.Printf("[Langfuse] UpdateGeneration 失败: %v", err)
 		return nil, fmt.Errorf("更新Generation失败: %w", err)
 	}
+	log.Printf("[Langfuse] UpdateGeneration 成功: generationID=%s", generationID)
 	return generation, nil
 }
 
@@ -336,15 +370,24 @@ type TraceContext struct {
 // StartTrace 开始一个新的Trace会话
 func StartTrace(ctx context.Context, name string, userID string, metadata map[string]interface{}) (*TraceContext, error) {
 	lc := GetLangfuseClient()
+	log.Printf("[Langfuse] StartTrace 被调用: name=%s, clientEnabled=%v", name, lc.IsEnabled())
+
 	if !lc.IsEnabled() {
+		log.Printf("[Langfuse] StartTrace 返回 nil，客户端未启用")
 		return nil, nil
 	}
 
 	trace, err := lc.CreateTrace(ctx, name, userID, metadata)
 	if err != nil {
+		log.Printf("[Langfuse] StartTrace 失败: %v", err)
 		return nil, err
 	}
+	if trace == nil {
+		log.Printf("[Langfuse] StartTrace 返回 nil trace")
+		return nil, nil
+	}
 
+	log.Printf("[Langfuse] StartTrace 成功: traceID=%s", trace.ID)
 	return &TraceContext{
 		TraceID:   trace.ID,
 		Name:      name,
@@ -396,15 +439,25 @@ func (sc *SpanContext) End(ctx context.Context, output interface{}) error {
 // StartGeneration 在指定Trace下开始一个Generation（LLM调用）
 func (tc *TraceContext) StartGeneration(ctx context.Context, name string, model string, messages []ChatMessage) (*GenerationContext, error) {
 	lc := GetLangfuseClient()
+	log.Printf("[Langfuse] TraceContext.StartGeneration 被调用: name=%s, model=%s, traceID=%s, clientEnabled=%v, tcIsNil=%v",
+		name, model, tc.TraceID, lc.IsEnabled(), tc == nil)
+
 	if !lc.IsEnabled() || tc == nil {
+		log.Printf("[Langfuse] StartGeneration 返回 nil，clientEnabled=%v, tcIsNil=%v", lc.IsEnabled(), tc == nil)
 		return nil, nil
 	}
 
 	generation, err := lc.CreateGeneration(ctx, tc.TraceID, name, model, messages)
 	if err != nil {
+		log.Printf("[Langfuse] TraceContext.StartGeneration 失败: %v", err)
 		return nil, err
 	}
+	if generation == nil {
+		log.Printf("[Langfuse] TraceContext.StartGeneration 返回 nil generation")
+		return nil, nil
+	}
 
+	log.Printf("[Langfuse] TraceContext.StartGeneration 成功: generationID=%s", generation.ID)
 	return &GenerationContext{
 		TraceID:      tc.TraceID,
 		GenerationID: generation.ID,
@@ -428,7 +481,11 @@ type GenerationContext struct {
 // End 结束Generation，记录输出和token消耗
 func (gc *GenerationContext) End(ctx context.Context, output string, inputTokens, outputTokens int) error {
 	lc := GetLangfuseClient()
+	log.Printf("[Langfuse] GenerationContext.End 被调用: generationID=%s, clientEnabled=%v, gcIsNil=%v",
+		gc.GenerationID, lc.IsEnabled(), gc == nil)
+
 	if !lc.IsEnabled() || gc == nil {
+		log.Printf("[Langfuse] GenerationContext.End 直接返回，clientEnabled=%v, gcIsNil=%v", lc.IsEnabled(), gc == nil)
 		return nil
 	}
 
@@ -440,7 +497,12 @@ func (gc *GenerationContext) End(ctx context.Context, output string, inputTokens
 	}
 
 	_, err := lc.UpdateGeneration(ctx, gc.GenerationID, output, usage)
-	return err
+	if err != nil {
+		log.Printf("[Langfuse] GenerationContext.End 失败: %v", err)
+		return err
+	}
+	log.Printf("[Langfuse] GenerationContext.End 成功: generationID=%s", gc.GenerationID)
+	return nil
 }
 
 // EndWithUsage 结束Generation，使用预计算的Usage
