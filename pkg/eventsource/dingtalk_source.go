@@ -301,6 +301,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"regexp"
@@ -377,6 +378,35 @@ func NewDingTalkSource(cfg DingTalkSourceConfig) *DingTalkSource {
 		// 匹配常见时间格式：09:30、9:30、09:30:00
 		timeRegexp: regexp.MustCompile(`\b\d{1,2}:\d{2}(:\d{2})?\b`),
 	}
+}
+
+// randomColors 预定义的随机好看的颜色列表
+var randomColors = []string{
+	"#FF6B6B", // 珊瑚红
+	"#4ECDC4", // 青绿色
+	"#45B7D1", // 天蓝色
+	"#96CEB4", // 薄荷绿
+	"#FFEAA7", // 奶油黄
+	"#DDA0DD", // 梅花紫
+	"#98D8C8", // 浅青色
+	"#F7DC6F", // 金黄色
+	"#BB8FCE", // 薰衣草紫
+	"#85C1E2", // 浅蓝色
+	"#F8B195", // 鲑鱼粉
+	"#C06C84", // 玫瑰粉
+	"#6C5B7B", // 紫灰色
+	"#355C7D", // 深蓝色
+	"#A8E6CF", // 薄荷青
+	"#DCEDC1", // 柠檬绿
+	"#FFD3B6", // 蜜桃色
+	"#FFAAA5", // 浅珊瑚
+	"#FF8B94", // 粉红色
+	"#C7CEEA", // 淡紫色
+}
+
+// getRandomColor 返回一个随机的好看的颜色
+func getRandomColor() string {
+	return randomColors[rand.Intn(len(randomColors))]
 }
 
 // Name 返回数据源名称
@@ -609,11 +639,13 @@ func (s *DingTalkSource) parseMessages(texts []string, sessionName, appName stri
 				Sender:    sender,
 				Content:   text,
 				Timestamp: now,
+				Color:     getRandomColor(),
 			}
 
 			// 如果内容里包含时间前缀（"发送者 09:30 内容"），尝试解析
 			if parsed := s.tryParseInlineMessage(text, sessionName, appName, now); parsed != nil {
 				event = parsed
+				event.Color = getRandomColor()
 			}
 
 			events = append(events, event)
@@ -828,6 +860,7 @@ func (s *DingTalkSource) processSnapshotsViaVLModel(handler MessageEventHandler)
 				Sender:    sender,
 				Content:   content,
 				Timestamp: now,
+				Color:     getRandomColor(),
 			}
 
 			if !s.isDuplicate(event) {

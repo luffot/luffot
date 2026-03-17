@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,14 @@ import (
 	"github.com/luffot/luffot/pkg/config"
 	"github.com/luffot/luffot/pkg/pet"
 )
+
+// urlRegexp 匹配 URL 的正则表达式
+var urlRegexp = regexp.MustCompile(`https?://[^\s]+`)
+
+// replaceURLsWithEmoji 将文本中的 URL 替换为 [🔗]
+func replaceURLsWithEmoji(text string) string {
+	return urlRegexp.ReplaceAllString(text, "[🔗]")
+}
 
 // defaultBarrageColor 默认弹幕颜色：蓝色
 var defaultBarrageColor = color.RGBA{0, 120, 255, 255}
@@ -231,8 +240,10 @@ func (d *BarrageDisplay) AddMessage(content, sender, app, avatarURL, colorHex st
 	yPos := float64(track*d.trackHeight+d.trackHeight) + statusBarOffset
 	speed := 3.0 + rand.Float64()*2.0
 
+	// 替换 URL 为 [🔗]
+	processedContent := replaceURLsWithEmoji(content)
 	item := &barrageItem{
-		displayText: sender + ": " + content,
+		displayText: sender + ": " + processedContent,
 		x:           float64(d.screenWidth + 20),
 		y:           yPos,
 		speed:       speed,
