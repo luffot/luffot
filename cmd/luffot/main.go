@@ -4,24 +4,23 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"syscall"
-	"time"
-
-	"log"
-
 	"github.com/luffot/luffot/pkg/ai"
 	"github.com/luffot/luffot/pkg/barrage"
 	"github.com/luffot/luffot/pkg/config"
 	"github.com/luffot/luffot/pkg/embedfs"
 	"github.com/luffot/luffot/pkg/eventsource"
+	"github.com/luffot/luffot/pkg/logger"
 	"github.com/luffot/luffot/pkg/manager"
 	"github.com/luffot/luffot/pkg/pet"
 	"github.com/luffot/luffot/pkg/storage"
 	"github.com/luffot/luffot/pkg/tray"
 	"github.com/luffot/luffot/pkg/web"
+	"log"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
 )
 
 // 注意：eventsource 包仍被 FileTailSource 使用，保留 import
@@ -38,8 +37,12 @@ var (
 )
 
 func init() {
-
-	log.SetOutput(os.Stdout)
+	// 初始化滚动日志（输出到 stdout 和 ~/.luffot/log/app.log）
+	logDir := filepath.Join(os.Getenv("HOME"), ".luffot", "log")
+	if err := logger.InitLogger(logDir); err != nil {
+		fmt.Fprintf(os.Stderr, "初始化日志失败: %v\n", err)
+		os.Exit(1)
+	}
 
 	defaultConfigPath := filepath.Join(os.Getenv("HOME"), ".luffot", "config.yaml")
 	defaultDataDir := filepath.Join(os.Getenv("HOME"), ".luffot", "data")
