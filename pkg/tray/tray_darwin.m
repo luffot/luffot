@@ -106,39 +106,6 @@ void createStatusBar(int webPort, const char **skinNames, const char *activeSkin
         NSMenu *menu = [[NSMenu alloc] init];
         [menu setAutoenablesItems:NO];
 
-        // 皮肤子菜单（tag 从 100 开始）
-        NSMenuItem *skinParent = [[NSMenuItem alloc] initWithTitle:@"🎨 皮肤配置"
-                                                            action:nil
-                                                     keyEquivalent:@""];
-        NSMenu *skinMenu = [[NSMenu alloc] init];
-        for (NSUInteger i = 0; i < [skinNamesCopy count]; i++) {
-            NSString *name = skinNamesCopy[i];
-            NSString *title = [name isEqualToString:activeSkinCopy]
-                ? [NSString stringWithFormat:@"\u2713 %@", name]
-                : name;
-            NSMenuItem *skinItem = [[NSMenuItem alloc] initWithTitle:title
-                                                              action:@selector(menuItemClicked:)
-                                                       keyEquivalent:@""];
-            [skinItem setTag:(NSInteger)(100 + i)];
-            [skinItem setTarget:gDelegate];
-            [skinMenu addItem:skinItem];
-        }
-        [skinParent setSubmenu:skinMenu];
-        [menu addItem:skinParent];
-
-        // Web 管理界面（tag=2，仅 webPort>0 时显示）
-        if (webPortCopy > 0) {
-            NSString *webTitle = [NSString stringWithFormat:@"🌐 Web 管理界面 (:%d)", webPortCopy];
-            NSMenuItem *webItem = [[NSMenuItem alloc] initWithTitle:webTitle
-                                                             action:@selector(menuItemClicked:)
-                                                      keyEquivalent:@""];
-            [webItem setTag:2];
-            [webItem setTarget:gDelegate];
-            [menu addItem:webItem];
-        }
-
-        [menu addItem:[NSMenuItem separatorItem]];
-
         // 设置（tag=3）
         NSMenuItem *settingsItem = [[NSMenuItem alloc] initWithTitle:@"⚙️ 设置面板"
                                                               action:@selector(menuItemClicked:)

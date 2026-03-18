@@ -15,6 +15,14 @@
 ## 🎬 演示效果
 
 <p align="center">
+  <img src="https://github.com/luffot/luffot/raw/main/luffot.1.png" width="80%" alt="Luffot 演示图 1">
+</p>
+
+<p align="center">
+  <img src="https://github.com/luffot/luffot/raw/main/luffot.2.png" width="80%" alt="Luffot 演示图 2">
+</p>
+
+<p align="center">
   <video src="https://github.com/luffot/luffot/raw/main/demo-show.mov" width="100%" controls></video>
 </p>
 
