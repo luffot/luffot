@@ -5,7 +5,6 @@ import {
   Bot,
   Bell,
   MessageSquare,
-  FileText,
   Palette,
   Monitor,
   Camera,
@@ -177,11 +176,6 @@ export default function Layout({ children }: LayoutProps) {
             </NavLink>
           </NavGroup>
 
-          <NavItem
-            to="/prompt"
-            icon={<FileText className="w-4 h-4" />}
-            label="提示词管理"
-          />
           <NavItem
             to="/process-monitor"
             icon={<Monitor className="w-4 h-4" />}

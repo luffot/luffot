@@ -100,6 +100,17 @@ async function loadCameraSettings() {
     } catch (e) {
         showToast('加载摄像头配置失败：' + e.message, 'error');
     }
+
+    // 加载 camera_guard 提示词
+    try {
+        const promptRes = await fetch('/api/prompts/camera_guard');
+        if (promptRes.ok) {
+            const promptData = await promptRes.json();
+            document.getElementById('camera-prompt-content').value = promptData.content || '';
+        }
+    } catch (e) {
+        console.error('加载摄像头提示词失败:', e);
+    }
 }
 
 async function saveCameraSettings() {
@@ -137,6 +148,18 @@ async function saveCameraSettings() {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         showToast('摄像头设置已保存', 'ok');
+
+        // 同时保存 camera_guard 提示词
+        const promptContent = document.getElementById('camera-prompt-content').value;
+        try {
+            await fetch('/api/prompts/camera_guard', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: promptContent }),
+            });
+        } catch (promptErr) {
+            console.error('保存摄像头提示词失败:', promptErr);
+        }
     } catch (e) {
         showToast('保存失败：' + e.message, 'error');
     }

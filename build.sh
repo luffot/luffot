@@ -120,15 +120,30 @@ CGO_LDFLAGS="-framework UniformTypeIdentifiers" CGO_ENABLED=1 go build \
     ./cmd/luffot-wails/
 echo "  Wails 设置窗口二进制已替换为正确入口"
 
-# Wails 设置窗口以 Regular 模式运行（不设 LSUIElement），
-# 打开时 Dock 显示图标，关闭后进程退出 Dock 图标自动消失。
+# 5. 将 Wails 设置窗口嵌入主 App Bundle 的 Helpers 目录
+# 这样设置窗口作为主 App 的 Helper，在系统设置中只需给 Luffot.app 一个应用授权
+echo ""
+echo "[5/4] 将设置窗口嵌入主 App Bundle..."
+HELPERS_DIR="$APP_DIR/Contents/Helpers"
+mkdir -p "$HELPERS_DIR"
+
+# 将 Wails 设置窗口整个 .app 复制到 Helpers 目录
+# 使用 "Luffot Settings.app" 作为统一名称
+EMBEDDED_APP="$HELPERS_DIR/Luffot Settings.app"
+rm -rf "$EMBEDDED_APP"
+cp -R "$WAILS_APP_DIR" "$EMBEDDED_APP"
+echo "  已嵌入: $EMBEDDED_APP"
+
+# 同时保留 build/bin 下的独立副本，方便开发调试
+echo "  独立副本保留: $WAILS_APP_DIR"
 
 echo ""
 echo "========================================"
 echo "  构建完成!"
 echo ""
 echo "  主进程:       build/bin/Luffot.app"
-echo "  设置窗口:     build/bin/Luffot Settings.app"
+echo "  设置窗口(嵌入): Luffot.app/Contents/Helpers/Luffot Settings.app"
+echo "  设置窗口(独立): build/bin/luffot-settings.app (开发调试用)"
 echo ""
 echo "  使用方式:"
 echo "    open build/bin/Luffot.app"

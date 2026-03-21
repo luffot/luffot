@@ -89,7 +89,6 @@ function navigateTo(pageId) {
     }
 
     // 按需懒加载
-    if (pageId === "prompt") loadPrompts();
     if (pageId === "tasks") loadTasks();
     if (pageId === "messages") loadMessagesPage();
     if (pageId === "guard-log") loadGuardLog();

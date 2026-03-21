@@ -44,6 +44,17 @@ async function loadSettings() {
 
         renderProviderList(cfg.providers || []);
         updateAiStatusBar(cfg);
+        
+        // 加载 agent_system 提示词
+        try {
+            const promptRes = await fetch('/api/prompts/agent_system');
+            if (promptRes.ok) {
+                const promptData = await promptRes.json();
+                document.getElementById('model-agent-prompt-content').value = promptData.content || '';
+            }
+        } catch (e) {
+            console.error('加载小钉人设提示词失败:', e);
+        }
     } catch (e) {
         showToast('加载配置失败：' + e.message, 'error');
     }
@@ -155,6 +166,18 @@ async function saveSettings() {
             showToast('✅ ' + data.message, 'success');
             currentConfig = { ...currentConfig, ...cfg };
             updateAiStatusBar(cfg);
+            
+            // 同时保存 agent_system 提示词
+            const agentPromptContent = document.getElementById('model-agent-prompt-content').value;
+            try {
+                await fetch('/api/prompts/agent_system', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: agentPromptContent }),
+                });
+            } catch (promptErr) {
+                console.error('保存小钉人设提示词失败:', promptErr);
+            }
         } else {
             showToast('❌ 保存失败：' + data.error, 'error');
         }

@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -164,7 +165,10 @@ func (a *App) GetCameraDetections(limit int, offset int) (map[string]interface{}
 	for _, detection := range detections {
 		imageURL := ""
 		if detection.ImagePath != "" {
-			imageURL = "/captures/" + filepath.Base(detection.ImagePath)
+			// Wails 应用中无法使用相对路径访问本地文件，需要将图片转为 base64 数据 URL
+			if imgData, err := os.ReadFile(detection.ImagePath); err == nil {
+				imageURL = "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(imgData)
+			}
 		}
 		results = append(results, detectionWithURL{
 			ID:         detection.ID,

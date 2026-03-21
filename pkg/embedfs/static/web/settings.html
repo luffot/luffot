@@ -49,10 +49,6 @@
                     <span class="sub-icon">⭐</span>弹幕特别关注
                 </a>
             </div>
-            <a class="nav-item" data-page="prompt" onclick="navigateTo('prompt');return false;" href="#">
-                <span class="nav-icon">📝</span>
-                <span class="nav-label">提示词管理</span>
-            </a>
             <a class="nav-item" data-page="process-monitor" onclick="navigateTo('process-monitor');return false;" href="#">
                 <span class="nav-icon">📱</span>
                 <span class="nav-label">进程监控</span>
@@ -199,6 +195,27 @@
                     </div>
                 </div>
 
+                <!-- 小钉人设提示词 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🐦</span>
+                        <h2>小钉人设（System Prompt）</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-hint" style="margin-bottom:1rem;padding:0.8rem 1rem;background:#f5f3ff;border-radius:8px;border-left:3px solid #6366f1;color:#4f46e5;">
+                            定义 AI 桌宠「小钉」的性格特点和说话风格，修改后立即生效，无需重启。
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label class="form-label">agent_system 提示词</label>
+                            <textarea id="model-agent-prompt-content" rows="12"
+                                style="width:100%;padding:0.75rem 1rem;border:1.5px solid #e5e7eb;border-radius:9px;font-size:0.85rem;color:#1f2937;background:#fafafa;outline:none;resize:vertical;font-family:'Menlo','Monaco','Courier New',monospace;line-height:1.6;transition:border-color 0.2s,box-shadow 0.2s;"
+                                placeholder="加载中..."
+                                onfocus="this.style.borderColor='#6366f1';this.style.boxShadow='0 0 0 3px rgba(99,102,241,0.12)';this.style.background='white'"
+                                onblur="this.style.borderColor='#e5e7eb';this.style.boxShadow='none';this.style.background='#fafafa'"></textarea>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="action-bar">
                     <button class="btn btn-primary" onclick="saveSettings()">💾 保存配置</button>
                 </div>
@@ -316,28 +333,6 @@
                 </div>
             </div>
 
-            <!-- 提示词管理页 -->
-            <div class="page" id="page-prompt">
-                <div class="page-header">
-                    <h1>📝 提示词管理</h1>
-                    <p>管理 AI 各场景的 Prompt 模板，修改后立即生效，无需重启</p>
-                </div>
-                <div class="card">
-                    <div class="card-header">
-                        <span class="card-icon">📁</span>
-                        <h2>Prompt 文件</h2>
-                        <span class="card-badge" id="prompt-dir-badge" style="font-family:monospace;font-size:0.65rem;">加载中...</span>
-                    </div>
-                    <div class="card-body">
-                        <div class="form-hint" style="margin-bottom:1.2rem;padding:0.8rem 1rem;background:#f5f3ff;border-radius:8px;border-left:3px solid #6366f1;color:#4f46e5;">
-                            每个提示词对应 <code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">~/.luffot/prompt/</code> 目录下的一个 Markdown 文件。
-                            User Prompt 模板中可使用 <code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">{{profile}}</code>、<code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">{{messages}}</code>、<code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">{{old_profile}}</code> 占位符。
-                        </div>
-                        <div id="prompt-list"></div>
-                    </div>
-                </div>
-            </div>
-
             <!-- 皮肤配置页 -->
             <div class="page" id="page-skin">
                 <div class="page-header">
@@ -409,6 +404,23 @@
                     <div class="card-body" style="padding:0;">
                         <div id="process-monitor-list">
                             <div style="padding:2rem;text-align:center;color:#9ca3af;font-size:0.875rem;">加载中...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 消息分析提示词 -->
+                <div class="card" style="margin-top:1.5rem;">
+                    <div class="card-header">
+                        <span class="card-icon">📝</span>
+                        <h2>消息分析提示词</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-hint" style="margin-bottom:1.2rem;padding:0.8rem 1rem;background:#f5f3ff;border-radius:8px;border-left:3px solid #6366f1;color:#4f46e5;">
+                            管理消息重要性分析、用户画像分析和 VLModel 消息识别的 Prompt 模板，修改后立即生效。
+                            User Prompt 模板中可使用 <code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">{{profile}}</code>、<code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">{{messages}}</code>、<code style="background:#ede9fe;padding:0.1rem 0.4rem;border-radius:4px;">{{old_profile}}</code> 占位符。
+                        </div>
+                        <div id="process-prompt-list">
+                            <div style="text-align:center;color:#9ca3af;padding:1rem;font-size:0.875rem;">加载中...</div>
                         </div>
                     </div>
                 </div>
@@ -500,6 +512,27 @@
                                 <input type="number" id="camera-cooldown" placeholder="60" min="10" max="3600">
                                 <div class="form-hint">触发告警后多少秒内不再重复告警，建议 60~300</div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 检测提示词 -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">📝</span>
+                        <h2>检测提示词</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-hint" style="margin-bottom:1rem;padding:0.8rem 1rem;background:#f5f3ff;border-radius:8px;border-left:3px solid #6366f1;color:#4f46e5;">
+                            配置发给视觉 AI 的背后有人检测 Prompt，第一行必须返回 YES/NO，YES 时附上判断理由。修改后立即生效。
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label class="form-label">camera_guard 提示词</label>
+                            <textarea id="camera-prompt-content" rows="12"
+                                style="width:100%;padding:0.75rem 1rem;border:1.5px solid #e5e7eb;border-radius:9px;font-size:0.85rem;color:#1f2937;background:#fafafa;outline:none;resize:vertical;font-family:'Menlo','Monaco','Courier New',monospace;line-height:1.6;transition:border-color 0.2s,box-shadow 0.2s;"
+                                placeholder="加载中..."
+                                onfocus="this.style.borderColor='#6366f1';this.style.boxShadow='0 0 0 3px rgba(99,102,241,0.12)';this.style.background='white'"
+                                onblur="this.style.borderColor='#e5e7eb';this.style.boxShadow='none';this.style.background='#fafafa'"></textarea>
                         </div>
                     </div>
                 </div>
@@ -774,7 +807,6 @@
     <script src="/static/page-model.js"></script>
     <script src="/static/page-alert.js"></script>
     <script src="/static/page-barrage.js"></script>
-    <script src="/static/page-prompt.js"></script>
     <script src="/static/page-process-monitor.js"></script>
     <script src="/static/page-tasks.js"></script>
     <script src="/static/page-messages.js"></script>

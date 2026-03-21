@@ -15,7 +15,6 @@ import "C"
 
 import (
 	"fmt"
-	"os"
 	"time"
 	"unsafe"
 
@@ -72,11 +71,10 @@ func goMenuCallback(tag C.int) {
 
 	switch {
 	case tagInt == 0:
-		// 退出
+		// 退出：由 onQuit 回调负责清理子进程和服务后退出，不在此处直接 os.Exit
 		if gOnQuit != nil {
 			gOnQuit()
 		}
-		os.Exit(0)
 
 	case tagInt == 1:
 		// 关于

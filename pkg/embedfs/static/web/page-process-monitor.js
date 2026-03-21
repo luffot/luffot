@@ -4,6 +4,16 @@ let processMonitorApps = [];
 let aiProviders = [];
 let availablePrompts = [];
 
+// 进程监控相关的提示词
+const PROCESS_PROMPT_NAMES = [
+    { name: 'analyzer_importance_system', displayName: '消息重要性分析（System）', description: '消息重要性分析助手的角色定义' },
+    { name: 'analyzer_importance_user', displayName: '消息重要性分析（User Prompt 模板）', description: '判断消息是否重要的分析模板' },
+    { name: 'analyzer_profile_system', displayName: '用户画像分析（System）', description: '用户画像分析助手的角色定义' },
+    { name: 'analyzer_profile_user', displayName: '用户画像更新（User Prompt 模板）', description: '根据消息内容生成/更新用户画像的模板' },
+    { name: 'vlmodel_message_extract', displayName: 'VLModel 消息识别指令', description: '用于进程监控的视觉模型消息识别 Prompt' },
+];
+let processPromptContents = {};
+
 // 加载进程监控配置
 async function loadProcessMonitorConfig() {
     try {
@@ -21,6 +31,14 @@ async function loadProcessMonitorConfig() {
         processMonitorApps = appsData.apps || [];
         aiProviders = aiConfig.ai?.providers || [];
         availablePrompts = promptsData.prompts || [];
+
+        // 存储进程相关提示词内容
+        const allPrompts = promptsData.prompts || [];
+        PROCESS_PROMPT_NAMES.forEach(meta => {
+            const found = allPrompts.find(p => p.name === meta.name);
+            processPromptContents[meta.name] = found ? found.content : '';
+        });
+        renderProcessPromptList();
 
         renderProcessMonitorList();
     } catch (error) {
@@ -335,3 +353,65 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }, 100);
 });
+
+function renderProcessPromptList() {
+    const container = document.getElementById('process-prompt-list');
+    if (!container) return;
+
+    let html = '';
+    PROCESS_PROMPT_NAMES.forEach((meta, index) => {
+        const content = processPromptContents[meta.name] || '';
+        html += `
+        <div class="prompt-item" style="border:1px solid #e5e7eb;border-radius:10px;margin-bottom:0.8rem;overflow:hidden;">
+            <div class="prompt-item-header" style="display:flex;justify-content:space-between;align-items:center;padding:0.8rem 1rem;cursor:pointer;background:#fafafa;" onclick="toggleProcessPrompt('${meta.name}')">
+                <div>
+                    <span style="font-weight:600;font-size:0.9rem;color:#1f2937;">${escapeHtml(meta.displayName)}</span>
+                    <span style="display:block;font-size:0.75rem;color:#6b7280;margin-top:0.2rem;">${escapeHtml(meta.description)}</span>
+                </div>
+                <span id="process-prompt-arrow-${meta.name}" style="font-size:0.75rem;color:#9ca3af;transition:transform 0.2s;">▶</span>
+            </div>
+            <div id="process-prompt-body-${meta.name}" style="display:none;padding:0.8rem 1rem;border-top:1px solid #e5e7eb;">
+                <textarea id="process-prompt-textarea-${meta.name}" rows="10"
+                    style="width:100%;padding:0.75rem 1rem;border:1.5px solid #e5e7eb;border-radius:9px;font-size:0.85rem;color:#1f2937;background:#fafafa;outline:none;resize:vertical;font-family:'Menlo','Monaco','Courier New',monospace;line-height:1.6;transition:border-color 0.2s,box-shadow 0.2s;"
+                    onfocus="this.style.borderColor='#6366f1';this.style.boxShadow='0 0 0 3px rgba(99,102,241,0.12)';this.style.background='white'"
+                    onblur="this.style.borderColor='#e5e7eb';this.style.boxShadow='none';this.style.background='#fafafa'">${escapeHtml(content)}</textarea>
+                <div style="display:flex;justify-content:flex-end;margin-top:0.6rem;gap:0.5rem;">
+                    <button class="btn btn-primary btn-sm" onclick="saveProcessPrompt('${meta.name}')">💾 保存</button>
+                </div>
+            </div>
+        </div>`;
+    });
+
+    container.innerHTML = html;
+}
+
+function toggleProcessPrompt(name) {
+    const body = document.getElementById('process-prompt-body-' + name);
+    const arrow = document.getElementById('process-prompt-arrow-' + name);
+    if (!body) return;
+    const isHidden = body.style.display === 'none';
+    body.style.display = isHidden ? 'block' : 'none';
+    if (arrow) arrow.textContent = isHidden ? '▼' : '▶';
+}
+
+async function saveProcessPrompt(name) {
+    const textarea = document.getElementById('process-prompt-textarea-' + name);
+    if (!textarea) return;
+    const content = textarea.value;
+    try {
+        const res = await fetch('/api/prompts/' + name, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            processPromptContents[name] = content;
+            showToast('✅ 提示词保存成功', 'success');
+        } else {
+            showToast('❌ 保存失败：' + data.error, 'error');
+        }
+    } catch (e) {
+        showToast('❌ 网络错误：' + e.message, 'error');
+    }
+}

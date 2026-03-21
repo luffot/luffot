@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Save, Bot, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, Save, Bot, AlertCircle, FileText } from 'lucide-react'
 import { wailsAPI } from '../lib/wails'
 import type { AIConfig, AIProviderConfig } from '../types'
 
@@ -14,9 +14,12 @@ export default function ModelConfigPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [promptContent, setPromptContent] = useState('')
+  const [promptLoading, setPromptLoading] = useState(false)
 
   useEffect(() => {
     loadConfig()
+    loadPrompt()
   }, [])
 
   const loadConfig = async () => {
@@ -30,11 +33,24 @@ export default function ModelConfigPage() {
     }
   }
 
+  const loadPrompt = async () => {
+    setPromptLoading(true)
+    try {
+      const data = await wailsAPI.getPrompt('agent_system')
+      setPromptContent(typeof data === 'string' ? data : data?.content || '')
+    } catch (error) {
+      console.error('Failed to load agent_system prompt:', error)
+    } finally {
+      setPromptLoading(false)
+    }
+  }
+
   const handleSave = async () => {
     if (!config) return
     setSaving(true)
     try {
       await wailsAPI.saveAIConfig(config)
+      await wailsAPI.savePrompt('agent_system', promptContent)
       setMessage({ type: 'success', text: '保存成功，配置已生效' })
     } catch (error) {
       setMessage({ type: 'error', text: '保存失败：' + String(error) })
@@ -264,6 +280,34 @@ export default function ModelConfigPage() {
               </div>
             ))
           )}
+        </div>
+      </div>
+
+      {/* Agent System Prompt */}
+      <div className="card">
+        <div className="card-header">
+          <FileText className="w-5 h-5 text-primary-600" />
+          <h3 className="text-lg font-semibold text-gray-900">小钉人设（System Prompt）</h3>
+        </div>
+        <div className="card-body space-y-4">
+          <p className="text-sm text-gray-500">
+            自定义小钉的 AI 人设和性格，这将影响小钉在对话中的表现。建议使用简洁、清晰的语言描述。
+          </p>
+          <div className="form-group mb-0">
+            {promptLoading ? (
+              <div className="flex items-center justify-center h-48">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" />
+              </div>
+            ) : (
+              <textarea
+                value={promptContent}
+                onChange={(e) => setPromptContent(e.target.value)}
+                placeholder="例如：你是一个友善、幽默的桌面助手，名字叫小钉..."
+                className="form-textarea min-h-[200px]"
+                rows={10}
+              />
+            )}
+          </div>
         </div>
       </div>
 

@@ -288,8 +288,13 @@ static DingTalkBatchResult* readAllDingTalkWindows() {
     return batch;
 }
 
-// checkAccessibilityPermission 检查辅助功能权限
-static int checkAccessibilityPermission() {
+// isAccessibilityGranted 静默检查辅助功能权限（不弹出系统授权对话框）
+static int isAccessibilityGranted() {
+    return AXIsProcessTrusted() ? 1 : 0;
+}
+
+// requestAccessibilityPermission 检查辅助功能权限并在未授权时弹出系统授权对话框
+static int requestAccessibilityPermission() {
     NSDictionary* options = @{(__bridge NSString*)kAXTrustedCheckOptionPrompt: @YES};
     return AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options) ? 1 : 0;
 }
@@ -449,10 +454,13 @@ func (s *DingTalkSource) Start(ctx context.Context, handler MessageEventHandler)
 	s.running = true
 	s.mu.Unlock()
 
-	// 检查辅助功能权限
-	if C.checkAccessibilityPermission() == 0 {
-		fmt.Println("[DingTalk] ⚠️  未授予辅助功能权限，已弹出系统授权对话框，请授权后重启程序")
+	// 检查辅助功能权限：先静默检查，已授权则不弹窗；未授权时才弹出系统授权对话框
+	if C.isAccessibilityGranted() == 0 {
+		fmt.Println("[DingTalk] ⚠️  未授予辅助功能权限，正在弹出系统授权对话框...")
+		C.requestAccessibilityPermission()
 		fmt.Println("[DingTalk]    路径：系统设置 → 隐私与安全性 → 辅助功能")
+	} else {
+		fmt.Println("[DingTalk] ✅ 辅助功能权限已就绪")
 	}
 
 	fmt.Println("[DingTalk] 开始监听钉钉/阿里钉窗口消息（AXObserver + 30s 兜底轮询）")

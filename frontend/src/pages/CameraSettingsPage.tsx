@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, Clock, Bot, Shield, AlertCircle } from 'lucide-react'
+import { Save, Clock, Bot, Shield, AlertCircle, FileText } from 'lucide-react'
 import { wailsAPI } from '../lib/wails'
 import type { CameraGuardConfig } from '../types'
 
@@ -8,9 +8,12 @@ export default function CameraSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [promptContent, setPromptContent] = useState('')
+  const [promptLoading, setPromptLoading] = useState(true)
 
   useEffect(() => {
     loadConfig()
+    loadPrompt()
   }, [])
 
   const loadConfig = async () => {
@@ -24,11 +27,23 @@ export default function CameraSettingsPage() {
     }
   }
 
+  const loadPrompt = async () => {
+    try {
+      const data = await wailsAPI.getPrompt('camera_guard')
+      setPromptContent(typeof data === 'string' ? data : data?.content || '')
+    } catch (error) {
+      console.error('Failed to load camera_guard prompt:', error)
+    } finally {
+      setPromptLoading(false)
+    }
+  }
+
   const handleSave = async () => {
     if (!config) return
     setSaving(true)
     try {
       await wailsAPI.saveCameraGuardConfig(config)
+      await wailsAPI.savePrompt('camera_guard', promptContent)
       setMessage({ type: 'success', text: '保存成功，配置已生效' })
     } catch (error) {
       setMessage({ type: 'error', text: '保存失败：' + String(error) })
@@ -166,6 +181,37 @@ export default function CameraSettingsPage() {
               />
               <p className="text-xs text-gray-500 mt-1">触发告警后多少秒内不再重复告警，建议 60~300</p>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Prompt Card */}
+      <div className="card">
+        <div className="card-header">
+          <FileText className="w-5 h-5 text-primary-600" />
+          <h3 className="text-lg font-semibold text-gray-900">检测提示词</h3>
+        </div>
+        <div className="card-body">
+          <p className="text-sm text-gray-500 mb-4">
+            自定义 AI 分析摄像头画面时使用的提示词，用于判断是否需要触发告警
+          </p>
+          <div className="form-group mb-0">
+            {promptLoading ? (
+              <div className="flex items-center justify-center h-32 bg-gray-50 rounded-lg">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" />
+              </div>
+            ) : (
+              <textarea
+                value={promptContent}
+                onChange={(e) => setPromptContent(e.target.value)}
+                placeholder="请输入检测提示词..."
+                className="form-input h-32 resize-y"
+                rows={8}
+              />
+            )}
+            <p className="text-xs text-gray-500 mt-1">
+              提示词将用于 AI 分析摄像头截图，判断是否检测到需要告警的场景
+            </p>
           </div>
         </div>
       </div>

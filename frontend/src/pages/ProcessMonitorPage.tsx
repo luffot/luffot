@@ -1,7 +1,19 @@
 import { useState, useEffect } from 'react'
-import { Monitor, Plus, Trash2, Save, AlertCircle } from 'lucide-react'
+import { Monitor, Plus, Trash2, Save, AlertCircle, FileText, ChevronDown, ChevronRight } from 'lucide-react'
 import { wailsAPI } from '../lib/wails'
 import type { AppConfigItem } from '../types'
+
+// 进程监控相关的提示词名称常量
+const PROCESS_PROMPT_NAMES = ['analyzer_importance_system', 'analyzer_importance_user', 'analyzer_profile_system', 'analyzer_profile_user', 'vlmodel_message_extract']
+
+// 提示词元信息映射
+const PROMPT_META_INFO: Record<string, { display_name: string; description: string }> = {
+  analyzer_importance_system: { display_name: '消息重要性分析', description: 'System Prompt' },
+  analyzer_importance_user: { display_name: '消息重要性分析', description: 'User Prompt 模板' },
+  analyzer_profile_system: { display_name: '用户画像分析', description: 'System Prompt' },
+  analyzer_profile_user: { display_name: '用户画像更新', description: 'User Prompt 模板' },
+  vlmodel_message_extract: { display_name: 'VLModel 消息识别', description: '指令' },
+}
 
 export default function ProcessMonitorPage() {
   const [apps, setApps] = useState<AppConfigItem[]>([])
@@ -30,9 +42,16 @@ export default function ProcessMonitorPage() {
       vlmodel_prompt: '',
     },
   })
+  
+  // 提示词相关 state
+  const [prompts, setPrompts] = useState<Record<string, string>>({})
+  const [promptsLoading, setPromptsLoading] = useState(false)
+  const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null)
+  const [promptSaving, setPromptSaving] = useState<string | null>(null)
 
   useEffect(() => {
     loadApps()
+    loadPrompts()
   }, [])
 
   const loadApps = async () => {
@@ -43,6 +62,26 @@ export default function ProcessMonitorPage() {
       console.error('Failed to load apps:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadPrompts = async () => {
+    setPromptsLoading(true)
+    try {
+      const data = await wailsAPI.getPrompts()
+      const allPrompts = data.prompts || []
+      // 过滤出进程监控相关的提示词
+      const filteredPrompts = allPrompts
+        .filter((p: { name: string }) => PROCESS_PROMPT_NAMES.includes(p.name))
+        .reduce((acc: Record<string, string>, p: { name: string; content: string }) => {
+          acc[p.name] = p.content
+          return acc
+        }, {})
+      setPrompts(filteredPrompts)
+    } catch (error) {
+      console.error('Failed to load prompts:', error)
+    } finally {
+      setPromptsLoading(false)
     }
   }
 
@@ -109,6 +148,23 @@ export default function ProcessMonitorPage() {
       setMessage({ type: 'error', text: '删除失败：' + String(error) })
     }
     setTimeout(() => setMessage(null), 3000)
+  }
+
+  const handleSavePrompt = async (name: string) => {
+    setPromptSaving(name)
+    try {
+      await wailsAPI.savePrompt(name, prompts[name])
+      setMessage({ type: 'success', text: '提示词保存成功' })
+    } catch (error) {
+      setMessage({ type: 'error', text: '提示词保存失败：' + String(error) })
+    } finally {
+      setPromptSaving(null)
+      setTimeout(() => setMessage(null), 3000)
+    }
+  }
+
+  const updatePromptContent = (name: string, content: string) => {
+    setPrompts({ ...prompts, [name]: content })
   }
 
   if (loading) {
@@ -395,6 +451,74 @@ export default function ProcessMonitorPage() {
                 )}
               </div>
             ))
+          )}
+        </div>
+      </div>
+
+      {/* 消息分析提示词 */}
+      <div className="card">
+        <div className="card-header">
+          <FileText className="w-5 h-5 text-primary-600" />
+          <h3 className="text-lg font-semibold text-gray-900">消息分析提示词</h3>
+        </div>
+        <div className="card-body">
+          {promptsLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {PROCESS_PROMPT_NAMES.map((name) => {
+                const meta = PROMPT_META_INFO[name]
+                const isExpanded = expandedPrompt === name
+                const isSaving = promptSaving === name
+                
+                return (
+                  <div key={name} className="border border-gray-200 rounded-lg overflow-hidden">
+                    {/* 提示词标题栏 */}
+                    <button
+                      onClick={() => setExpandedPrompt(isExpanded ? null : name)}
+                      className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        {isExpanded ? (
+                          <ChevronDown className="w-4 h-4 text-gray-500" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-gray-500" />
+                        )}
+                        <div className="text-left">
+                          <div className="font-medium text-gray-900">{meta.display_name}</div>
+                          <div className="text-sm text-gray-500">{meta.description}</div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-400 font-mono">{name}</div>
+                    </button>
+                    
+                    {/* 提示词编辑区 */}
+                    {isExpanded && (
+                      <div className="p-4 space-y-3 bg-white">
+                        <textarea
+                          value={prompts[name] || ''}
+                          onChange={(e) => updatePromptContent(name, e.target.value)}
+                          placeholder="输入提示词内容..."
+                          className="w-full h-48 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none text-sm font-mono"
+                        />
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => handleSavePrompt(name)}
+                            disabled={isSaving}
+                            className="btn-primary btn-sm"
+                          >
+                            <Save className="w-4 h-4" />
+                            {isSaving ? '保存中...' : '保存'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
       </div>

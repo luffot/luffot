@@ -9,7 +9,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,7 +27,6 @@ import (
 	"github.com/luffot/luffot/pkg/storage"
 	"github.com/luffot/luffot/pkg/tray"
 	"github.com/luffot/luffot/pkg/web"
-	"runtime"
 )
 
 var (
@@ -37,6 +38,10 @@ var (
 	barrageHeight int
 	logFile       string
 	httpPort      int
+
+	// childProcesses 跟踪所有由主进程启动的子进程（如 Wails 设置窗口）
+	childProcesses   []*os.Process
+	childProcessesMu sync.Mutex
 )
 
 func init() {
@@ -292,10 +297,16 @@ func Run() {
 
 	// 启动状态栏（在 Ebiten RunGame 之前创建，Ebiten 的 RunLoop 会驱动状态栏事件）
 	fmt.Print("正在启动状态栏... ")
+	// shutdownAll 在下方定义，这里用闭包延迟引用
+	var shutdownAll func()
 	trayInstance := tray.NewTray(cfg,
 		func() {
 			fmt.Println("退出请求")
-			cancel()
+			if shutdownAll != nil {
+				go shutdownAll()
+			} else {
+				cancel()
+			}
 		},
 		func() {
 			fmt.Println("切换监听状态")
@@ -329,11 +340,14 @@ func Run() {
 	// 发送通知
 	trayInstance.ShowNotification("消息监听器", "服务已启动")
 
-	// 在 goroutine 中等待退出信号
-	go func() {
-		<-sigChan
+	// shutdownAll 统一的关闭逻辑，确保子进程、服务全部清理后再退出
+	shutdownAll = func() {
 		fmt.Println("\n正在关闭服务...")
 		cancel()
+
+		// 先终止所有子进程（Wails 设置窗口等）
+		terminateChildProcesses()
+
 		msgManager.Stop()
 		eventServer.Stop()
 		if webServer != nil {
@@ -345,6 +359,12 @@ func Run() {
 
 		fmt.Println("已退出")
 		os.Exit(0)
+	}
+
+	// 在 goroutine 中等待退出信号
+	go func() {
+		<-sigChan
+		shutdownAll()
 	}()
 
 	// Ebiten 主循环（阻塞主线程）
@@ -361,15 +381,22 @@ func Run() {
 	}
 }
 
-// openWailsSettingsApp 通过 macOS open 命令启动独立的 Wails 设置窗口 .app
+// openWailsSettingsApp 启动独立的 Wails 设置窗口
+// 直接执行 .app bundle 内的可执行文件（而非 open -a），以便获取真实的子进程引用，
+// 主进程退出时可以通过信号终止它。
 func openWailsSettingsApp() error {
 	wailsAppPath := findWailsApp()
 	if wailsAppPath == "" {
 		return fmt.Errorf("未找到 Luffot Settings.app，请确保已构建 Wails 设置窗口")
 	}
 
-	cmd := exec.Command("open", "-a", wailsAppPath,
-		"--args",
+	// 查找 .app bundle 内的可执行文件
+	wailsExecPath := findWailsExecutable(wailsAppPath)
+	if wailsExecPath == "" {
+		return fmt.Errorf("未找到 %s 内的可执行文件", wailsAppPath)
+	}
+
+	cmd := exec.Command(wailsExecPath,
 		"--config", configPath,
 		"--data", dataDir,
 	)
@@ -380,21 +407,106 @@ func openWailsSettingsApp() error {
 		return fmt.Errorf("启动 Wails 设置窗口失败: %w", err)
 	}
 
+	// 跟踪子进程，退出时统一终止
+	trackChildProcess(cmd.Process)
+
 	go func() {
 		if err := cmd.Wait(); err != nil {
 			log.Printf("Wails 设置窗口进程退出: %v", err)
 		}
+		untrackChildProcess(cmd.Process)
 	}()
 
 	return nil
 }
 
+// trackChildProcess 将子进程加入跟踪列表
+func trackChildProcess(process *os.Process) {
+	childProcessesMu.Lock()
+	defer childProcessesMu.Unlock()
+	childProcesses = append(childProcesses, process)
+}
+
+// untrackChildProcess 将已退出的子进程从跟踪列表移除
+func untrackChildProcess(process *os.Process) {
+	childProcessesMu.Lock()
+	defer childProcessesMu.Unlock()
+	for i, p := range childProcesses {
+		if p.Pid == process.Pid {
+			childProcesses = append(childProcesses[:i], childProcesses[i+1:]...)
+			return
+		}
+	}
+}
+
+// terminateChildProcesses 终止所有被跟踪的子进程
+// 先发送 SIGTERM 让子进程优雅退出，超时后强制 SIGKILL
+func terminateChildProcesses() {
+	childProcessesMu.Lock()
+	processes := make([]*os.Process, len(childProcesses))
+	copy(processes, childProcesses)
+	childProcessesMu.Unlock()
+
+	if len(processes) == 0 {
+		return
+	}
+
+	fmt.Printf("正在终止 %d 个子进程...\n", len(processes))
+
+	// 先发送 SIGTERM
+	for _, process := range processes {
+		if err := process.Signal(syscall.SIGTERM); err != nil {
+			log.Printf("发送 SIGTERM 到进程 %d 失败: %v", process.Pid, err)
+		}
+	}
+
+	// 等待最多 3 秒让子进程优雅退出
+	done := make(chan struct{})
+	go func() {
+		for _, process := range processes {
+			_, _ = process.Wait()
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		fmt.Println("所有子进程已退出")
+	case <-time.After(3 * time.Second):
+		// 超时，强制终止
+		fmt.Println("子进程未在 3 秒内退出，强制终止...")
+		for _, process := range processes {
+			_ = process.Kill()
+		}
+	}
+}
+
+// findWailsExecutable 查找 .app bundle 内的可执行文件
+func findWailsExecutable(appPath string) string {
+	macosDir := filepath.Join(appPath, "Contents", "MacOS")
+	entries, err := os.ReadDir(macosDir)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			candidate := filepath.Join(macosDir, entry.Name())
+			info, err := os.Stat(candidate)
+			if err == nil && info.Mode()&0111 != 0 {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
 // findWailsApp 查找 Luffot Settings.app 的路径
 // 搜索顺序：
-// 1. 主进程所在 .app bundle 的同级目录
-// 2. 主进程可执行文件的同级目录
-// 3. build/bin 目录（开发时）
-// 4. /Applications 目录
+// 1. 主进程所在 .app bundle 的 Contents/Helpers 目录（嵌入式 Helper，共享授权）
+// 2. 主进程所在 .app bundle 的同级目录（向后兼容）
+// 3. 主进程可执行文件的同级目录
+// 4. build/bin 目录（开发时）
+// 5. /Applications 目录
 func findWailsApp() string {
 	// 兼容不同的构建产物名称：
 	// wails build 可能输出 "Luffot Settings.app"（outputfilename）或 "luffot-settings.app"（name）
@@ -407,22 +519,25 @@ func findWailsApp() string {
 	execPath, _ = filepath.EvalSymlinks(execPath)
 	execDir := filepath.Dir(execPath)
 
-	searchDirs := make([]string, 0, 4)
+	searchDirs := make([]string, 0, 6)
 
-	// 1. 如果主进程在 .app bundle 内，查找同级目录
+	// 1. 如果主进程在 .app bundle 内，优先查找 Contents/Helpers 目录（嵌入式 Helper）
 	if strings.Contains(execDir, ".app/Contents/MacOS") {
-		bundleDir := filepath.Dir(filepath.Dir(filepath.Dir(execDir)))
-		searchDirs = append(searchDirs, bundleDir)
+		bundleContentsDir := filepath.Dir(execDir) // .app/Contents
+		searchDirs = append(searchDirs, filepath.Join(bundleContentsDir, "Helpers"))
+		// 2. 同级目录（向后兼容）
+		bundleDir := filepath.Dir(bundleContentsDir) // .app 所在目录
+		searchDirs = append(searchDirs, filepath.Dir(bundleDir))
 	}
 
-	// 2. 可执行文件同级目录
+	// 3. 可执行文件同级目录
 	searchDirs = append(searchDirs, execDir)
 
-	// 3. build/bin 目录（开发时）
+	// 4. build/bin 目录（开发时）
 	workDir, _ := os.Getwd()
 	searchDirs = append(searchDirs, filepath.Join(workDir, "build", "bin"))
 
-	// 4. /Applications 目录
+	// 5. /Applications 目录
 	searchDirs = append(searchDirs, "/Applications")
 
 	for _, dir := range searchDirs {

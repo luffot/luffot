@@ -1,0 +1,6 @@
+.qoder
+build
+./cmd/skin-builder/*.yaml
+data
+frontend/dist
+frontend/node_modules
