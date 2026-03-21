@@ -28,7 +28,10 @@ var gWebPort int
 // gOnQuit 保存退出回调
 var gOnQuit func()
 
-// startNSStatusBar 初始化 NSStatusBar（非阻塞，通过 dispatch_async 在主线程创建）
+// gOnOpenSettings 保存打开设置窗口回调
+var gOnOpenSettings func()
+
+// startNSStatusBar 初始化 NSStatusBar
 func startNSStatusBar(webPort int, webEnabled bool, onQuit func()) {
 	gWebPort = webPort
 	gOnQuit = onQuit
@@ -50,8 +53,7 @@ func startNSStatusBar(webPort int, webEnabled bool, onQuit func()) {
 
 	C.createStatusBar(C.int(displayPort), (**C.char)(unsafe.Pointer(&cSkinNames[0])), activeSkin)
 
-	// dispatch_async 是异步的，ObjC 层已经复制了字符串内容
-	// 等待一小段时间确保 dispatch block 已执行，再释放 C 字符串
+	// 释放 C 字符串
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		for i := range skinNames {
@@ -66,6 +68,7 @@ func startNSStatusBar(webPort int, webEnabled bool, onQuit func()) {
 //export goMenuCallback
 func goMenuCallback(tag C.int) {
 	tagInt := int(tag)
+	fmt.Printf("[状态栏] 菜单点击回调触发, tag=%d\n", tagInt)
 
 	switch {
 	case tagInt == 0:
@@ -84,8 +87,10 @@ func goMenuCallback(tag C.int) {
 		go openBrowser(fmt.Sprintf("http://localhost:%d", gWebPort))
 
 	case tagInt == 3:
-		// 打开设置页面
-		go openBrowser(fmt.Sprintf("http://localhost:%d/settings", gWebPort))
+		// 打开 Wails 设置窗口
+		if gOnOpenSettings != nil {
+			go gOnOpenSettings()
+		}
 
 	case tagInt >= 100:
 		// 皮肤切换：tag=100 对应 SkinNames[0]，以此类推

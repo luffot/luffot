@@ -1,0 +1,31 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "luffot-settings",
+  "outputfilename": "Luffot Settings",
+  "frontend": {
+    "dir": "./frontend",
+    "install": "npm install",
+    "build": "npm run build && mkdir -p internal/assets/frontend/dist && cp -r frontend/dist/* internal/assets/frontend/dist/",
+    "package": "npm run build && mkdir -p internal/assets/frontend/dist && cp -r frontend/dist/* internal/assets/frontend/dist/"
+  },
+  "author": {
+    "name": "luffyren",
+    "email": "fayren@qq.com"
+  },
+  "info": {
+    "companyName": "小飞",
+    "productName": "Luffot Settings",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2026",
+    "comments": "Luffot 设置面板"
+  },
+  "nsisType": "multiple",
+  "obfuscate": false,
+  "wailsjsdir": "./frontend/src/lib",
+  "debounceMS": 100,
+  "devserver": "localhost:34115",
+  "appargs": "",
+  "go": {
+    "main": "./cmd/luffot-wails"
+  }
+}

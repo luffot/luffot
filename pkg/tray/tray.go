@@ -10,28 +10,31 @@ import (
 
 // Tray 系统状态栏
 type Tray struct {
-	config     *config.AppConfig
-	onQuit     func()
-	onToggle   func()
-	onOpenWeb  func()
-	webPort    int
-	webEnabled bool
+	config         *config.AppConfig
+	onQuit         func()
+	onToggle       func()
+	onOpenWeb      func()
+	onOpenSettings func() // 打开 Wails 设置窗口
+	webPort        int
+	webEnabled     bool
 }
 
 // NewTray 创建状态栏实例
-func NewTray(cfg *config.AppConfig, onQuit, onToggle, onOpenWeb func()) *Tray {
+func NewTray(cfg *config.AppConfig, onQuit, onToggle, onOpenWeb, onOpenSettings func()) *Tray {
 	return &Tray{
-		config:     cfg,
-		onQuit:     onQuit,
-		onToggle:   onToggle,
-		onOpenWeb:  onOpenWeb,
-		webPort:    cfg.Web.Port,
-		webEnabled: cfg.Web.Enabled,
+		config:         cfg,
+		onQuit:         onQuit,
+		onToggle:       onToggle,
+		onOpenWeb:      onOpenWeb,
+		onOpenSettings: onOpenSettings,
+		webPort:        cfg.Web.Port,
+		webEnabled:     cfg.Web.Enabled,
 	}
 }
 
 // Start 启动系统托盘（非阻塞，在 goroutine 中初始化 NSStatusBar）
 func (t *Tray) Start() {
+	gOnOpenSettings = t.onOpenSettings
 	startNSStatusBar(t.webPort, t.webEnabled, t.onQuit)
 }
 
