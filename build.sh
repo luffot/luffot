@@ -27,6 +27,29 @@ cp -r frontend/dist/* internal/assets/frontend/dist/
 # 删除 wails 生成的临时文件
 rm -f frontend/wails.json
 
+# 2.5. 同步应用图标到嵌入目录 & 生成 icns
+echo ""
+echo "[2.5/4] 同步应用图标..."
+mkdir -p pkg/embedfs/static/icon
+cp luffot.png pkg/embedfs/static/icon/luffot.png
+
+# 使用 macOS sips + iconutil 将 PNG 转换为 icns（无需第三方工具）
+ICONSET_DIR=$(mktemp -d)/luffot.iconset
+mkdir -p "$ICONSET_DIR"
+sips -z 16 16     luffot.png --out "$ICONSET_DIR/icon_16x16.png"      > /dev/null 2>&1
+sips -z 32 32     luffot.png --out "$ICONSET_DIR/icon_16x16@2x.png"   > /dev/null 2>&1
+sips -z 32 32     luffot.png --out "$ICONSET_DIR/icon_32x32.png"      > /dev/null 2>&1
+sips -z 64 64     luffot.png --out "$ICONSET_DIR/icon_32x32@2x.png"   > /dev/null 2>&1
+sips -z 128 128   luffot.png --out "$ICONSET_DIR/icon_128x128.png"    > /dev/null 2>&1
+sips -z 256 256   luffot.png --out "$ICONSET_DIR/icon_128x128@2x.png" > /dev/null 2>&1
+sips -z 256 256   luffot.png --out "$ICONSET_DIR/icon_256x256.png"    > /dev/null 2>&1
+sips -z 512 512   luffot.png --out "$ICONSET_DIR/icon_256x256@2x.png" > /dev/null 2>&1
+sips -z 512 512   luffot.png --out "$ICONSET_DIR/icon_512x512.png"    > /dev/null 2>&1
+sips -z 1024 1024 luffot.png --out "$ICONSET_DIR/icon_512x512@2x.png" > /dev/null 2>&1
+iconutil -c icns "$ICONSET_DIR" -o build/luffot.icns
+rm -rf "$(dirname "$ICONSET_DIR")"
+echo "  应用图标已生成: build/luffot.icns"
+
 # 3. 构建主进程（go build，不依赖 Wails 框架）
 echo ""
 echo "[3/4] 构建主进程 (go build)..."
@@ -69,7 +92,7 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
     <key>CFBundleIconFile</key>
-    <string>iconfile</string>
+    <string>luffot</string>
     <key>LSMinimumSystemVersion</key>
     <string>10.13.0</string>
     <key>NSHighResolutionCapable</key>
@@ -86,7 +109,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
-echo "  Luffot.app 创建完成"
+# 复制应用图标到 Resources 目录
+cp build/luffot.icns "$APP_DIR/Contents/Resources/luffot.icns"
+echo "  Luffot.app 创建完成（含应用图标）"
 
 # 4. 构建 Wails 设置窗口（独立 .app）
 echo ""
@@ -119,6 +144,12 @@ CGO_LDFLAGS="-framework UniformTypeIdentifiers" CGO_ENABLED=1 go build \
     -o "$WAILS_APP_DIR/Contents/MacOS/Luffot Settings" \
     ./cmd/luffot-wails/
 echo "  Wails 设置窗口二进制已替换为正确入口"
+
+# 复制应用图标到 Wails 设置窗口的 Resources 目录，并更新 Info.plist
+cp build/luffot.icns "$WAILS_APP_DIR/Contents/Resources/luffot.icns"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIconFile luffot" "$WAILS_APP_DIR/Contents/Info.plist" 2>/dev/null || \
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string luffot" "$WAILS_APP_DIR/Contents/Info.plist"
+echo "  Wails 设置窗口图标已设置"
 
 # 5. 将 Wails 设置窗口嵌入主 App Bundle 的 Helpers 目录
 # 这样设置窗口作为主 App 的 Helper，在系统设置中只需给 Luffot.app 一个应用授权

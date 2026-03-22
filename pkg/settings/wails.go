@@ -11,11 +11,13 @@ import (
 
 	"github.com/luffot/luffot/internal/assets"
 	"github.com/luffot/luffot/pkg/config"
+	"github.com/luffot/luffot/pkg/embedfs"
 	"github.com/luffot/luffot/pkg/scheduler"
 	"github.com/luffot/luffot/pkg/storage"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 // Run 启动 Wails 设置窗口（在 macOS 上通过 runtime.LockOSThread 确保在主线程运行）
@@ -43,6 +45,7 @@ func Run(cfg *config.AppConfig, st *storage.Storage, sched *scheduler.Scheduler)
 		Height:    800,
 		MinWidth:  1024,
 		MinHeight: 600,
+		Frameless: false,
 		AssetServer: &assetserver.Options{
 			Assets: assetsFS,
 		},
@@ -50,6 +53,23 @@ func Run(cfg *config.AppConfig, st *storage.Storage, sched *scheduler.Scheduler)
 		OnStartup:        app.Startup,
 		Bind: []interface{}{
 			app,
+		},
+		Mac: &mac.Options{
+			TitleBar: &mac.TitleBar{
+				TitlebarAppearsTransparent: true,
+				HideTitle:                  true,
+				HideTitleBar:               false,
+				FullSizeContent:            true,
+				UseToolbar:                 false,
+			},
+			About: &mac.AboutInfo{
+				Title:   "Luffot Settings",
+				Message: "Luffot 设置面板 v1.0.0",
+				Icon:    embedfs.AppIconPNG(),
+			},
+			WebviewIsTransparent: true,
+			WindowIsTranslucent:  false,
+			Appearance:           mac.NSAppearanceNameAqua,
 		},
 	})
 

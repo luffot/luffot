@@ -147,6 +147,20 @@
   }
 }
 
+/* Wails draggable area */
+.wails-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+}
+
+.wails-drag button,
+.wails-drag a,
+.wails-drag input {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

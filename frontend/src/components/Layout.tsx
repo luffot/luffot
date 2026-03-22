@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard,
   Bot,
   Bell,
   MessageSquare,
@@ -9,12 +8,15 @@ import {
   Monitor,
   Camera,
   Clock,
-  Brain,
   BarChart3,
   ChevronRight,
   ChevronDown,
   Settings,
   Sparkles,
+  Zap,
+  Keyboard,
+  Cpu,
+  LayoutDashboard,
 } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -46,6 +48,26 @@ function NavItem({ to, icon, label, end }: NavItemProps) {
     >
       {icon}
       <span>{label}</span>
+    </NavLink>
+  )
+}
+
+/** 子菜单项（用于 NavGroup 内部） */
+function SubNavItem({ to, label }: { to: string; label: string }) {
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) =>
+        cn(
+          'flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors',
+          isActive
+            ? 'text-primary-700 bg-primary-50'
+            : 'text-gray-600 hover:bg-gray-100'
+        )
+      }
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+      {label}
     </NavLink>
   )
 }
@@ -88,69 +110,93 @@ function NavGroup({ icon, label, children, isOpen, onToggle, isActive }: NavGrou
   )
 }
 
+/** 分组标题 */
+function SectionTitle({ title }: { title: string }) {
+  return (
+    <div className="pt-4 pb-2 first:pt-0">
+      <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+        {title}
+      </p>
+    </div>
+  )
+}
+
 interface LayoutProps {
   children: React.ReactNode
 }
 
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
-  const [barrageOpen, setBarrageOpen] = useState(
-    location.pathname.startsWith('/barrage')
-  )
+  const pathname = location.pathname
+
   const [cameraOpen, setCameraOpen] = useState(
-    location.pathname.startsWith('/camera')
+    pathname.startsWith('/camera')
   )
 
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
-        {/* Header */}
-        <div className="h-16 flex items-center px-6 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-              <Settings className="w-5 h-5 text-white" />
+        {/* Draggable title bar area - for macOS traffic lights */}
+        <div
+          className="h-12 flex items-center px-6 border-b border-gray-200 wails-drag"
+          style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
+        >
+          {/* 左侧留出红绿灯按钮空间 */}
+          <div className="flex items-center gap-2 pl-16">
+            <div className="w-7 h-7 bg-primary-600 rounded-lg flex items-center justify-center">
+              <Settings className="w-4 h-4 text-white" />
             </div>
-            <span className="text-lg font-semibold text-gray-900">Luffot</span>
+            <span className="text-base font-semibold text-gray-900">Luffot</span>
           </div>
         </div>
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-          <div className="pb-2">
-            <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              智能体
-            </p>
-          </div>
+          {/* ==================== 智能设置 ==================== */}
+          <SectionTitle title="智能设置" />
 
           <NavItem
             to="/agent-persona"
             icon={<Sparkles className="w-4 h-4" />}
-            label="智能体人设"
+            label="基础设置"
           />
           <NavItem
-            to="/model"
-            icon={<Bot className="w-4 h-4" />}
-            label="模型配置"
+            to="/skin"
+            icon={<Palette className="w-4 h-4" />}
+            label="皮肤设置"
+          />
+          <NavItem
+            to="/skill-center"
+            icon={<Zap className="w-4 h-4" />}
+            label="技能中心"
           />
 
-          <div className="pt-4 pb-2">
-            <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              数据
-            </p>
-          </div>
+          {/* ==================== 功能设置 ==================== */}
+          <SectionTitle title="功能设置" />
 
           <NavItem
-            to="/messages"
-            icon={<LayoutDashboard className="w-4 h-4" />}
-            label="消息总览"
+            to="/process-monitor"
+            icon={<Monitor className="w-4 h-4" />}
+            label="进程监控"
           />
 
-          <div className="pt-4 pb-2">
-            <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              配置管理
-            </p>
-          </div>
+          <NavGroup
+            icon={<Camera className="w-4 h-4" />}
+            label="环境监测"
+            isOpen={cameraOpen}
+            onToggle={() => setCameraOpen(!cameraOpen)}
+            isActive={pathname.startsWith('/camera')}
+          >
+            <SubNavItem to="/camera-settings" label="监测设置" />
+            <SubNavItem to="/camera-log" label="监测记录" />
+          </NavGroup>
+
+          <NavItem
+            to="/barrage"
+            icon={<MessageSquare className="w-4 h-4" />}
+            label="弹幕设置"
+          />
 
           <NavItem
             to="/alert"
@@ -158,117 +204,39 @@ export default function Layout({ children }: LayoutProps) {
             label="告警配置"
           />
 
-          <NavGroup
-            icon={<MessageSquare className="w-4 h-4" />}
-            label="弹幕设置"
-            isOpen={barrageOpen}
-            onToggle={() => setBarrageOpen(!barrageOpen)}
-            isActive={location.pathname.startsWith('/barrage')}
-          >
-            <NavLink
-              to="/barrage-filter"
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors',
-                  isActive
-                    ? 'text-primary-700 bg-primary-50'
-                    : 'text-gray-600 hover:bg-gray-100'
-                )
-              }
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-current" />
-              弹幕过滤
-            </NavLink>
-            <NavLink
-              to="/barrage-highlight"
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors',
-                  isActive
-                    ? 'text-primary-700 bg-primary-50'
-                    : 'text-gray-600 hover:bg-gray-100'
-                )
-              }
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-current" />
-              特别关注
-            </NavLink>
-          </NavGroup>
+          <NavItem
+            to="/messages"
+            icon={<LayoutDashboard className="w-4 h-4" />}
+            label="消息总览"
+          />
+
+          {/* ==================== 系统设置 ==================== */}
+          <SectionTitle title="系统设置" />
 
           <NavItem
-            to="/process-monitor"
-            icon={<Monitor className="w-4 h-4" />}
-            label="进程监控"
-          />
-          <NavItem
-            to="/skin"
-            icon={<Palette className="w-4 h-4" />}
-            label="皮肤配置"
-          />
-          <NavItem
-            to="/adk"
-            icon={<Brain className="w-4 h-4" />}
-            label="ADK 配置"
+            to="/model"
+            icon={<Bot className="w-4 h-4" />}
+            label="模型服务设置"
           />
           <NavItem
             to="/langfuse"
             icon={<BarChart3 className="w-4 h-4" />}
-            label="Langfuse 配置"
+            label="可观测配置"
           />
-
-          <div className="pt-4 pb-2">
-            <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              环境监测
-            </p>
-          </div>
-
-          <NavGroup
-            icon={<Camera className="w-4 h-4" />}
-            label="摄像头监测"
-            isOpen={cameraOpen}
-            onToggle={() => setCameraOpen(!cameraOpen)}
-            isActive={location.pathname.startsWith('/camera')}
-          >
-            <NavLink
-              to="/camera-settings"
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors',
-                  isActive
-                    ? 'text-primary-700 bg-primary-50'
-                    : 'text-gray-600 hover:bg-gray-100'
-                )
-              }
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-current" />
-              监测设置
-            </NavLink>
-            <NavLink
-              to="/camera-log"
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors',
-                  isActive
-                    ? 'text-primary-700 bg-primary-50'
-                    : 'text-gray-600 hover:bg-gray-100'
-                )
-              }
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-current" />
-              监测记录
-            </NavLink>
-          </NavGroup>
-
-          <div className="pt-4 pb-2">
-            <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              系统
-            </p>
-          </div>
-
+          <NavItem
+            to="/adk"
+            icon={<Cpu className="w-4 h-4" />}
+            label="ADK 配置"
+          />
           <NavItem
             to="/tasks"
             icon={<Clock className="w-4 h-4" />}
             label="定时任务"
+          />
+          <NavItem
+            to="/hotkeys"
+            icon={<Keyboard className="w-4 h-4" />}
+            label="快捷键"
           />
         </nav>
 
@@ -285,8 +253,13 @@ export default function Layout({ children }: LayoutProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="p-8 max-w-7xl mx-auto">
+      <main className="flex-1 overflow-auto flex flex-col">
+        {/* 右侧顶部拖拽区域 */}
+        <div
+          className="h-12 flex-shrink-0 wails-drag"
+          style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
+        />
+        <div className="flex-1 overflow-auto p-8 max-w-7xl mx-auto w-full">
           {children}
         </div>
       </main>

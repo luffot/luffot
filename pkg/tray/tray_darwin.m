@@ -149,6 +149,18 @@ void createStatusBar(int webPort, const char **skinNames, const char *activeSkin
     // 事件循环由 Go 侧的 runMainRunLoop() 启动
 }
 
+// setAppIcon 使用 PNG 数据设置应用图标
+// 此图标会显示在活动监视器、进程管理器中
+void setAppIcon(const void *pngData, int pngLen) {
+    if (pngData == NULL || pngLen <= 0) return;
+    
+    NSData *data = [NSData dataWithBytes:pngData length:pngLen];
+    NSImage *icon = [[NSImage alloc] initWithData:data];
+    if (icon != nil) {
+        [[NSApplication sharedApplication] setApplicationIconImage:icon];
+    }
+}
+
 // hideDockIcon 将应用激活策略重新设为 Accessory 模式，隐藏 Dock 图标
 // Ebiten 启动时会将策略重置为 Regular，需要在首帧重新调用
 void hideDockIcon() {

@@ -35,3 +35,14 @@ func SkinsFS() fs.FS {
 	}
 	return sub
 }
+
+// appIconPNG 嵌入应用图标 PNG 文件
+// 构建前由 build.sh 从项目根目录的 luffot.png 复制到此处
+//
+//go:embed static/icon/luffot.png
+var appIconPNG []byte
+
+// AppIconPNG 返回应用图标的 PNG 字节数据
+func AppIconPNG() []byte {
+	return appIconPNG
+}

@@ -8,6 +8,7 @@ package tray
 extern void createStatusBar(int webPort, const char **skinNames, const char *activeSkin);
 extern void updateSkinMenu(const char *activeSkin);
 extern void hideDockIcon();
+extern void setAppIcon(const void *pngData, int pngLen);
 
 // Go 回调函数的前向声明（由 Go 侧 export）
 extern void goMenuCallback(int tag);
@@ -27,6 +28,15 @@ import (
 // 需要在 Ebiten 启动后的首帧重新强制设置为 Accessory 模式
 func HideDockIcon() {
 	C.hideDockIcon()
+}
+
+// SetAppIcon 使用 PNG 数据设置应用图标
+// 此图标会显示在活动监视器、进程管理器中
+func SetAppIcon(pngData []byte) {
+	if len(pngData) == 0 {
+		return
+	}
+	C.setAppIcon(unsafe.Pointer(&pngData[0]), C.int(len(pngData)))
 }
 
 // gWebPort 保存 Web 端口，供 goMenuCallback 使用

@@ -295,6 +295,9 @@ func Run() {
 		fmt.Println("完成")
 	}
 
+	// 设置应用图标（活动监视器、进程管理器中显示的图标）
+	tray.SetAppIcon(embedfs.AppIconPNG())
+
 	// 启动状态栏（在 Ebiten RunGame 之前创建，Ebiten 的 RunLoop 会驱动状态栏事件）
 	fmt.Print("正在启动状态栏... ")
 	// shutdownAll 在下方定义，这里用闭包延迟引用
