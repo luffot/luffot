@@ -24,6 +24,7 @@ import (
 
 	"github.com/luffot/luffot/pkg/config"
 	"github.com/luffot/luffot/pkg/pet"
+	"github.com/luffot/luffot/pkg/tray"
 )
 
 // urlRegexp 匹配 URL 的正则表达式
@@ -116,6 +117,9 @@ type BarrageDisplay struct {
 	basketball basketballSprite
 	// 上一帧是否处于 alert 状态，用于检测 alert 开始时机
 	wasAlertActive bool
+
+	// dockIconFixed 标记是否已在首帧修复 Dock 图标（Ebiten 启动后会重置激活策略）
+	dockIconFixed bool
 }
 
 // NewBarrageDisplay 创建弹幕显示器
@@ -290,6 +294,13 @@ func (d *BarrageDisplay) fetchAndCacheAvatar(avatarURL string, size int) {
 
 // Update 实现 ebiten.Game 接口，每帧更新弹幕位置和宠物状态
 func (d *BarrageDisplay) Update() error {
+	// 首帧修复：Ebiten 启动时会将 macOS 激活策略重置为 Regular，导致 Dock 图标出现
+	// 在首帧重新强制设置为 Accessory 模式，隐藏 Dock 图标
+	if !d.dockIconFixed {
+		d.dockIconFixed = true
+		tray.HideDockIcon()
+	}
+
 	// 检测 Shift+Alt+L 全局快捷键，切换弹幕可见性
 	if pet.ConsumeToggleBarrage() {
 		d.barrageVisible = !d.barrageVisible

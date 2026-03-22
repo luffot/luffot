@@ -149,6 +149,14 @@ void createStatusBar(int webPort, const char **skinNames, const char *activeSkin
     // 事件循环由 Go 侧的 runMainRunLoop() 启动
 }
 
+// hideDockIcon 将应用激活策略重新设为 Accessory 模式，隐藏 Dock 图标
+// Ebiten 启动时会将策略重置为 Regular，需要在首帧重新调用
+void hideDockIcon() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    });
+}
+
 // updateSkinMenu 更新皮肤菜单勾选状态
 void updateSkinMenu(const char *activeSkin) {
     NSString *activeStr = activeSkin ? [NSString stringWithUTF8String:activeSkin] : @"";

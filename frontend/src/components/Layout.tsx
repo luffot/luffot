@@ -14,6 +14,7 @@ import {
   ChevronRight,
   ChevronDown,
   Settings,
+  Sparkles,
 } from 'lucide-react'
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
@@ -116,6 +117,29 @@ export default function Layout({ children }: LayoutProps) {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+          <div className="pb-2">
+            <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              智能体
+            </p>
+          </div>
+
+          <NavItem
+            to="/agent-persona"
+            icon={<Sparkles className="w-4 h-4" />}
+            label="智能体人设"
+          />
+          <NavItem
+            to="/model"
+            icon={<Bot className="w-4 h-4" />}
+            label="模型配置"
+          />
+
+          <div className="pt-4 pb-2">
+            <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              数据
+            </p>
+          </div>
+
           <NavItem
             to="/messages"
             icon={<LayoutDashboard className="w-4 h-4" />}
@@ -128,11 +152,6 @@ export default function Layout({ children }: LayoutProps) {
             </p>
           </div>
 
-          <NavItem
-            to="/model"
-            icon={<Bot className="w-4 h-4" />}
-            label="模型配置"
-          />
           <NavItem
             to="/alert"
             icon={<Bell className="w-4 h-4" />}

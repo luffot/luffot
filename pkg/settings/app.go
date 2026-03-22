@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/luffot/luffot/pkg/config"
+	"github.com/luffot/luffot/pkg/embedfs"
 	"github.com/luffot/luffot/pkg/pet"
 	"github.com/luffot/luffot/pkg/prompt"
 	"github.com/luffot/luffot/pkg/scheduler"
@@ -192,6 +193,10 @@ func (a *App) GetCameraDetections(limit int, offset int) (map[string]interface{}
 func (a *App) GetSkins() (map[string]interface{}, error) {
 	currentSkin := config.GetPetSkin()
 
+	// 确保图片皮肤和 Lua 皮肤已加载（Wails 独立窗口模式下可能尚未初始化）
+	pet.AutoLoadImageSkinsFromFS(embedfs.SkinsFS())
+	pet.InitLuaSkinSystem()
+
 	// 皮肤列表：矢量皮肤固定排在最前面
 	skins := []map[string]interface{}{
 		{"name": "经典皮肤", "internal": "", "description": "钉三多经典黑，原汁原味的矢量小蜜蜂", "type": "vector"},
@@ -258,6 +263,38 @@ func (a *App) ImportSkin(dir string, name string) (map[string]string, error) {
 		"message":   "皮肤导入成功，已可在皮肤列表中选择",
 		"skin_name": skinName,
 	}, nil
+}
+
+// ==================== 用户画像 API ====================
+
+// GetUserProfile 获取用户个人基础信息（~/.luffot/.my_profile）
+func (a *App) GetUserProfile() (map[string]string, error) {
+	profilePath := filepath.Join(os.Getenv("HOME"), ".luffot", ".my_profile")
+	data, err := os.ReadFile(profilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{
+				"content": "",
+			}, nil
+		}
+		return nil, fmt.Errorf("读取用户画像失败: %w", err)
+	}
+	return map[string]string{
+		"content": string(data),
+	}, nil
+}
+
+// SaveUserProfile 保存用户个人基础信息（~/.luffot/.my_profile）
+func (a *App) SaveUserProfile(content string) error {
+	profileDir := filepath.Join(os.Getenv("HOME"), ".luffot")
+	if err := os.MkdirAll(profileDir, 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+	profilePath := filepath.Join(profileDir, ".my_profile")
+	if err := os.WriteFile(profilePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("保存用户画像失败: %w", err)
+	}
+	return nil
 }
 
 // ==================== 提示词管理 API ====================

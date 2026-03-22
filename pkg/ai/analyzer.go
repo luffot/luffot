@@ -17,12 +17,13 @@ type AlertCallback func(message string)
 
 // IntelliAnalyzer 智能消息分析器
 // 定时从数据库拉取未分析的消息，用大模型判断重要性并推送气泡通知，
-// 同时维护一份基于消息内容的个人画像供后续分析使用。
+// 同时维护一份基于消息内容的个人画像和结构化用户记忆供后续分析使用。
 type IntelliAnalyzer struct {
-	agent      *Agent
-	storage    *storage.Storage
-	onAlert    AlertCallback
-	batchCount int // 已完成的批次数，用于控制画像更新频率
+	agent         *Agent
+	storage       *storage.Storage
+	memoryManager *UserMemoryManager
+	onAlert       AlertCallback
+	batchCount    int // 已完成的批次数，用于控制画像更新频率
 }
 
 // NewIntelliAnalyzer 创建智能消息分析器
@@ -31,10 +32,23 @@ type IntelliAnalyzer struct {
 // onAlert：有重要消息时触发的气泡通知回调
 func NewIntelliAnalyzer(agent *Agent, st *storage.Storage, onAlert AlertCallback) *IntelliAnalyzer {
 	return &IntelliAnalyzer{
-		agent:   agent,
-		storage: st,
-		onAlert: onAlert,
+		agent:         agent,
+		storage:       st,
+		memoryManager: NewUserMemoryManager(st, []string{"我"}),
+		onAlert:       onAlert,
 	}
+}
+
+// SetSelfSenders 设置用户自己的发送者名称列表（用于会话参与度分析）
+func (a *IntelliAnalyzer) SetSelfSenders(senders []string) {
+	if a.memoryManager != nil {
+		a.memoryManager.SetSelfSenders(senders)
+	}
+}
+
+// GetMemoryManager 获取用户记忆管理器（供外部访问）
+func (a *IntelliAnalyzer) GetMemoryManager() *UserMemoryManager {
+	return a.memoryManager
 }
 
 // Start 在后台 goroutine 中启动定时分析循环，非阻塞
@@ -172,6 +186,10 @@ func (a *IntelliAnalyzer) runOneBatch(ctx context.Context) {
 
 	log.Printf("[IntelliAnalyzer] 本批次待分析消息数: %d（起始 ID > %d）", len(messages), lastID)
 
+	// 将消息按会话和时间间隔分组为讨论上下文
+	contexts := a.memoryManager.GroupMessagesIntoContexts(messages)
+	log.Printf("[IntelliAnalyzer] 消息分组为 %d 个讨论上下文", len(contexts))
+
 	// 读取当前个人画像，作为分析上下文
 	userProfile, err := a.storage.GetUserProfile()
 	if err != nil {
@@ -179,8 +197,25 @@ func (a *IntelliAnalyzer) runOneBatch(ctx context.Context) {
 		userProfile = ""
 	}
 
+	// 读取用户记忆，作为长期分析上下文
+	memoryText, memErr := a.memoryManager.FormatMemoriesForPrompt(30)
+	if memErr != nil {
+		log.Printf("[IntelliAnalyzer] 读取用户记忆失败（将忽略）: %v", memErr)
+		memoryText = ""
+	}
+
+	// 读取会话参与度统计
+	participationText, partErr := a.memoryManager.FormatParticipationForPrompt("", 7)
+	if partErr != nil {
+		log.Printf("[IntelliAnalyzer] 读取会话参与度失败（将忽略）: %v", partErr)
+		participationText = ""
+	}
+
+	// 构建结构化的消息文本（使用上下文分组格式）
+	contextualMessagesText := a.memoryManager.FormatContextsForPrompt(contexts)
+
 	// 调用 LLM 分析重要性
-	importantNotices, err := a.analyzeImportance(ctx, messages, userProfile, cfg.ProviderName)
+	importantNotices, err := a.analyzeImportance(ctx, messages, userProfile, memoryText, participationText, contextualMessagesText, cfg.ProviderName)
 	if err != nil {
 		log.Printf("[IntelliAnalyzer] 重要性分析失败: %v", err)
 		// 分析失败时仍然推进 lastID，避免卡死在同一批消息上
@@ -213,37 +248,55 @@ func (a *IntelliAnalyzer) runOneBatch(ctx context.Context) {
 
 	a.batchCount++
 
-	// 每隔 profileUpdateEvery 批次更新一次个人画像
+	// 每隔 profileUpdateEvery 批次更新一次个人画像和用户记忆
 	if a.batchCount%profileUpdateEvery == 0 {
-		a.updateUserProfile(ctx, messages, userProfile, cfg.ProviderName)
+		a.updateUserProfileAndMemory(ctx, messages, contexts, userProfile, memoryText, participationText, contextualMessagesText, cfg.ProviderName)
+
+		// 定期清理过期的低重要性记忆
+		if cleaned, cleanErr := a.memoryManager.CleanupStaleMemories(); cleanErr != nil {
+			log.Printf("[IntelliAnalyzer] 清理过期记忆失败: %v", cleanErr)
+		} else if cleaned > 0 {
+			log.Printf("[IntelliAnalyzer] 已清理 %d 条过期记忆", cleaned)
+		}
 	}
 }
 
 // analyzeImportance 调用 LLM 判断一批消息中哪些值得通知用户
 // 返回需要推送的通知文本列表（每条对应一个重要事项）
+// memoryText: 用户长期记忆的格式化文本
+// participationText: 会话参与度统计的格式化文本
+// contextualMessagesText: 按上下文分组的结构化消息文本
 func (a *IntelliAnalyzer) analyzeImportance(
 	ctx context.Context,
 	messages []*storage.Message,
 	userProfile string,
+	memoryText string,
+	participationText string,
+	contextualMessagesText string,
 	providerName string,
 ) ([]string, error) {
-	// 先构建消息摘要文本
-	var msgLines []string
-	for _, msg := range messages {
-		line := fmt.Sprintf("[%s][%s] %s: %s",
-			msg.Timestamp.Format("01-02 15:04"),
-			msg.Session,
-			msg.Sender,
-			msg.Content,
-		)
-		msgLines = append(msgLines, line)
+	// 使用上下文分组的结构化消息文本（如果有），否则回退到扁平格式
+	messagesText := contextualMessagesText
+	if messagesText == "" {
+		var msgLines []string
+		for _, msg := range messages {
+			line := fmt.Sprintf("[%s][%s] %s: %s",
+				msg.Timestamp.Format("01-02 15:04"),
+				msg.Session,
+				msg.Sender,
+				msg.Content,
+			)
+			msgLines = append(msgLines, line)
+		}
+		messagesText = strings.Join(msgLines, "\n")
 	}
-	messagesText := strings.Join(msgLines, "\n")
 
 	// 创建 Trace 追踪消息重要性分析
 	traceCtx, err := StartTrace(ctx, "intelli-analyzer-importance", "", messagesText, map[string]interface{}{
-		"message_count": len(messages),
-		"has_profile":   userProfile != "",
+		"message_count":     len(messages),
+		"has_profile":       userProfile != "",
+		"has_memory":        memoryText != "",
+		"has_participation": participationText != "",
 	})
 	if err != nil {
 		log.Printf("[IntelliAnalyzer] 创建Trace失败: %v", err)
@@ -271,6 +324,31 @@ func (a *IntelliAnalyzer) analyzeImportance(
 `, userProfile)
 	}
 
+	// 构建用户记忆注入段
+	memorySection := ""
+	if memoryText != "" {
+		memorySection = fmt.Sprintf(`
+以下是用户的长期记忆（从历史消息中提炼的结构化知识），请结合记忆判断消息的重要性：
+<用户记忆>
+%s
+</用户记忆>
+`, memoryText)
+	}
+
+	// 构建会话参与度注入段
+	participationSection := ""
+	if participationText != "" {
+		participationSection = fmt.Sprintf(`
+以下是用户的会话参与度统计，用户从未发言的会话优先级较低：
+<会话参与度>
+%s
+</会话参与度>
+`, participationText)
+	}
+
+	// 合并所有上下文注入段
+	fullContextSection := profileSection + memorySection + participationSection
+
 	// 从文件加载 prompt 模板，用占位符替换实际内容
 	importanceSystemPrompt, err := prompt.Load("analyzer_importance_system")
 	if err != nil {
@@ -282,7 +360,7 @@ func (a *IntelliAnalyzer) analyzeImportance(
 		log.Printf("[IntelliAnalyzer] 加载 analyzer_importance_user prompt 失败，使用默认值: %v", err)
 		importanceUserTemplate = prompt.DefaultContent("analyzer_importance_user")
 	}
-	importanceUserPrompt := strings.ReplaceAll(importanceUserTemplate, "{{profile}}", profileSection)
+	importanceUserPrompt := strings.ReplaceAll(importanceUserTemplate, "{{profile}}", fullContextSection)
 	importanceUserPrompt = strings.ReplaceAll(importanceUserPrompt, "{{messages}}", messagesText)
 
 	chatMessages := []ChatMessage{
@@ -365,26 +443,38 @@ func (a *IntelliAnalyzer) analyzeImportance(
 	return notices, nil
 }
 
-// updateUserProfile 根据本批消息和旧画像，调用 LLM 生成新的个人画像并持久化
-func (a *IntelliAnalyzer) updateUserProfile(
+// updateUserProfileAndMemory 根据本批消息、上下文分组和旧画像，调用 LLM 同时更新个人画像和用户记忆
+// LLM 输出格式约定：
+//
+//	画像文本在 <profile>...</profile> 标签内
+//	记忆更新指令在 <memory_updates>...</memory_updates> 标签内
+func (a *IntelliAnalyzer) updateUserProfileAndMemory(
 	ctx context.Context,
 	messages []*storage.Message,
+	contexts []*ConversationContext,
 	currentProfile string,
+	memoryText string,
+	participationText string,
+	contextualMessagesText string,
 	providerName string,
 ) {
-	// 先构建消息摘要（只取内容，不需要完整格式）
-	var msgLines []string
-	for _, msg := range messages {
-		line := fmt.Sprintf("[%s][%s] %s: %s",
-			msg.Timestamp.Format("01-02 15:04"),
-			msg.Session,
-			msg.Sender,
-			msg.Content,
-		)
-		msgLines = append(msgLines, line)
+	// 使用上下文分组的结构化消息文本（如果有），否则回退到扁平格式
+	messagesText := contextualMessagesText
+	if messagesText == "" {
+		var msgLines []string
+		for _, msg := range messages {
+			line := fmt.Sprintf("[%s][%s] %s: %s",
+				msg.Timestamp.Format("01-02 15:04"),
+				msg.Session,
+				msg.Sender,
+				msg.Content,
+			)
+			msgLines = append(msgLines, line)
+		}
+		messagesText = strings.Join(msgLines, "\n")
 	}
-	messagesText := strings.Join(msgLines, "\n")
 
+	// 构建旧画像注入段
 	oldProfileSection := ""
 	if currentProfile != "" {
 		oldProfileSection = fmt.Sprintf(`
@@ -393,6 +483,28 @@ func (a *IntelliAnalyzer) updateUserProfile(
 %s
 </旧画像>
 `, currentProfile)
+	}
+
+	// 构建现有记忆注入段
+	existingMemorySection := ""
+	if memoryText != "" {
+		existingMemorySection = fmt.Sprintf(`
+当前已有的用户记忆（请在此基础上增量更新，避免重复添加已有记忆）：
+<现有记忆>
+%s
+</现有记忆>
+`, memoryText)
+	}
+
+	// 构建会话参与度注入段
+	participationSection := ""
+	if participationText != "" {
+		participationSection = fmt.Sprintf(`
+用户的会话参与度统计（用户从未发言的会话说明关注度低）：
+<会话参与度>
+%s
+</会话参与度>
+`, participationText)
 	}
 
 	// 从文件加载 prompt 模板，用占位符替换实际内容
@@ -408,11 +520,16 @@ func (a *IntelliAnalyzer) updateUserProfile(
 	}
 	profileUserPrompt := strings.ReplaceAll(profileUserTemplate, "{{old_profile}}", oldProfileSection)
 	profileUserPrompt = strings.ReplaceAll(profileUserPrompt, "{{messages}}", messagesText)
+	profileUserPrompt = strings.ReplaceAll(profileUserPrompt, "{{existing_memory}}", existingMemorySection)
+	profileUserPrompt = strings.ReplaceAll(profileUserPrompt, "{{participation}}", participationSection)
 
 	// 创建 Trace 追踪画像更新
-	traceCtx, err := StartTrace(ctx, "intelli-analyzer-profile", "", profileUserPrompt, map[string]interface{}{
-		"message_count":   len(messages),
-		"has_old_profile": currentProfile != "",
+	traceCtx, err := StartTrace(ctx, "intelli-analyzer-profile-memory", "", profileUserPrompt, map[string]interface{}{
+		"message_count":     len(messages),
+		"context_count":     len(contexts),
+		"has_old_profile":   currentProfile != "",
+		"has_memory":        memoryText != "",
+		"has_participation": participationText != "",
 	})
 	if err != nil {
 		log.Printf("[IntelliAnalyzer] 创建Trace失败: %v", err)
@@ -443,7 +560,7 @@ func (a *IntelliAnalyzer) updateUserProfile(
 	// 创建 Generation 追踪 LLM 调用
 	var genCtx *GenerationContext
 	if traceCtx != nil {
-		genCtx, err = traceCtx.StartGeneration(ctx, "update_profile_llm", providerCfg.Model, chatMessages)
+		genCtx, err = traceCtx.StartGeneration(ctx, "update_profile_memory_llm", providerCfg.Model, chatMessages)
 		if err != nil {
 			log.Printf("[IntelliAnalyzer] 创建Generation失败: %v", err)
 		}
@@ -453,11 +570,10 @@ func (a *IntelliAnalyzer) updateUserProfile(
 	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	newProfile, err := a.agent.doRequest(reqCtx, chatMessages, providerCfg)
+	llmReply, err := a.agent.doRequest(reqCtx, chatMessages, providerCfg)
 	if err != nil {
-		log.Printf("[IntelliAnalyzer] 生成个人画像失败: %v", err)
+		log.Printf("[IntelliAnalyzer] 生成画像和记忆失败: %v", err)
 		if genCtx != nil {
-			// 使用 background context 避免 reqCtx 被取消导致上报失败
 			_ = genCtx.End(context.Background(), "", 0, 0)
 		}
 		if traceCtx != nil {
@@ -469,11 +585,10 @@ func (a *IntelliAnalyzer) updateUserProfile(
 		return
 	}
 
-	newProfile = strings.TrimSpace(newProfile)
-	if newProfile == "" {
+	llmReply = strings.TrimSpace(llmReply)
+	if llmReply == "" {
 		if genCtx != nil {
-			// 使用 background context 避免 reqCtx 被取消导致上报失败
-			_ = genCtx.End(context.Background(), newProfile, CalculateMessagesTokens(chatMessages), CalculateTokens(newProfile))
+			_ = genCtx.End(context.Background(), llmReply, CalculateMessagesTokens(chatMessages), CalculateTokens(llmReply))
 		}
 		if traceCtx != nil {
 			_ = traceCtx.End(ctx, map[string]interface{}{
@@ -485,38 +600,90 @@ func (a *IntelliAnalyzer) updateUserProfile(
 
 	// 结束 Generation，记录输出和 token 消耗
 	if genCtx != nil {
-		// 使用 background context 避免 reqCtx 被取消导致上报失败
-		_ = genCtx.End(context.Background(), newProfile, CalculateMessagesTokens(chatMessages), CalculateTokens(newProfile))
+		_ = genCtx.End(context.Background(), llmReply, CalculateMessagesTokens(chatMessages), CalculateTokens(llmReply))
 	}
 
-	if saveErr := a.storage.SaveUserProfile(newProfile); saveErr != nil {
-		log.Printf("[IntelliAnalyzer] 保存个人画像失败: %v", saveErr)
-		// 创建失败事件并结束 trace
-		if traceCtx != nil {
-			_ = GetLangfuseClient().CreateEvent(ctx, traceCtx.TraceID, "update_profile_failed", map[string]interface{}{
-				"status": "save_failed",
-				"error":  saveErr.Error(),
-			})
-			_ = traceCtx.End(ctx, map[string]interface{}{"error": saveErr.Error()})
+	// 解析 LLM 输出：提取画像和记忆更新指令
+	newProfile, memoryInstructions := a.parseLLMProfileAndMemory(llmReply)
+
+	// 保存画像
+	if newProfile != "" {
+		if saveErr := a.storage.SaveUserProfile(newProfile); saveErr != nil {
+			log.Printf("[IntelliAnalyzer] 保存个人画像失败: %v", saveErr)
+			if traceCtx != nil {
+				_ = GetLangfuseClient().CreateEvent(ctx, traceCtx.TraceID, "update_profile_failed", map[string]interface{}{
+					"status": "save_failed",
+					"error":  saveErr.Error(),
+				})
+			}
+		} else {
+			log.Printf("[IntelliAnalyzer] 个人画像已更新（%d 字）", len([]rune(newProfile)))
 		}
-		return
 	}
 
-	log.Printf("[IntelliAnalyzer] 个人画像已更新（%d 字）", len([]rune(newProfile)))
+	// 执行记忆更新指令
+	if memoryInstructions != "" {
+		appliedCount, applyErr := a.memoryManager.ApplyMemoryInstructions(memoryInstructions)
+		if applyErr != nil {
+			log.Printf("[IntelliAnalyzer] 执行记忆更新指令失败: %v", applyErr)
+		} else {
+			log.Printf("[IntelliAnalyzer] 已执行 %d 条记忆更新指令", appliedCount)
+		}
+	}
 
 	// 创建结束事件并结束 trace
 	if traceCtx != nil {
-		if err := GetLangfuseClient().CreateEvent(ctx, traceCtx.TraceID, "update_profile_end", map[string]interface{}{
-			"status":         "completed",
-			"profile_length": len([]rune(newProfile)),
+		if err := GetLangfuseClient().CreateEvent(ctx, traceCtx.TraceID, "update_profile_memory_end", map[string]interface{}{
+			"status":             "completed",
+			"profile_length":     len([]rune(newProfile)),
+			"has_memory_updates": memoryInstructions != "",
 		}); err != nil {
 			log.Printf("[IntelliAnalyzer] 创建Event失败: %v", err)
 		}
-		// 结束 Trace，触发上报
 		if err := traceCtx.End(ctx, map[string]interface{}{
-			"profile_length": len([]rune(newProfile)),
+			"profile_length":     len([]rune(newProfile)),
+			"has_memory_updates": memoryInstructions != "",
 		}); err != nil {
 			log.Printf("[IntelliAnalyzer] 结束Trace失败: %v", err)
 		}
 	}
+}
+
+// parseLLMProfileAndMemory 从 LLM 输出中解析画像文本和记忆更新指令
+// 输出格式约定：
+//
+//	<profile>画像文本</profile>
+//	<memory_updates>记忆更新指令</memory_updates>
+//
+// 如果没有标签包裹，则整个输出视为画像文本（向后兼容）
+func (a *IntelliAnalyzer) parseLLMProfileAndMemory(llmReply string) (profile string, memoryInstructions string) {
+	// 提取 <profile>...</profile>
+	profileStart := strings.Index(llmReply, "<profile>")
+	profileEnd := strings.Index(llmReply, "</profile>")
+	if profileStart >= 0 && profileEnd > profileStart {
+		profile = strings.TrimSpace(llmReply[profileStart+len("<profile>") : profileEnd])
+	}
+
+	// 提取 <memory_updates>...</memory_updates>
+	memStart := strings.Index(llmReply, "<memory_updates>")
+	memEnd := strings.Index(llmReply, "</memory_updates>")
+	if memStart >= 0 && memEnd > memStart {
+		memoryInstructions = strings.TrimSpace(llmReply[memStart+len("<memory_updates>") : memEnd])
+	}
+
+	// 向后兼容：如果没有 <profile> 标签，整个输出视为画像文本
+	if profile == "" && profileStart < 0 {
+		profile = strings.TrimSpace(llmReply)
+		// 如果有 memory_updates 标签但没有 profile 标签，去掉 memory_updates 部分
+		if memStart >= 0 && memEnd > memStart {
+			beforeMem := strings.TrimSpace(llmReply[:memStart])
+			afterMem := ""
+			if memEnd+len("</memory_updates>") < len(llmReply) {
+				afterMem = strings.TrimSpace(llmReply[memEnd+len("</memory_updates>"):])
+			}
+			profile = strings.TrimSpace(beforeMem + "\n" + afterMem)
+		}
+	}
+
+	return profile, memoryInstructions
 }

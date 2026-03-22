@@ -275,6 +275,21 @@ export const wailsAPI = {
     return { success: true };
   },
   
+  // 用户画像
+  async getUserProfile() {
+    if (isWails) {
+      return (window as any).go.settings.App.GetUserProfile();
+    }
+    return { content: '' };
+  },
+
+  async saveUserProfile(content: string) {
+    if (isWails) {
+      return (window as any).go.settings.App.SaveUserProfile(content);
+    }
+    return { success: true };
+  },
+
   // ADK 配置
   async getADKConfig() {
     if (isWails) {

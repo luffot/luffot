@@ -605,8 +605,11 @@ func (s *DingTalkSource) parseMessages(texts []string, sessionName, appName stri
 	var events []*MessageEvent
 	now := time.Now()
 
+	// 状态机：追踪当前正在组装的消息的发送者和时间
 	currentSender := ""
 	currentTime := ""
+	// lastSender 记录上一条消息的发送者，用于连续消息场景（同一人连发多条时不重复显示名字）
+	lastSender := ""
 
 	for _, text := range texts {
 		text = strings.TrimSpace(text)
@@ -632,38 +635,63 @@ func (s *DingTalkSource) parseMessages(texts []string, sessionName, appName stri
 		}
 
 		// 其余视为消息内容
-		if text != "" {
-			sender := currentSender
-			if sender == "" {
-				sender = s.extractSenderFromContent(text)
-			}
-			if sender == "" {
-				sender = "未知"
-			}
-
-			event := &MessageEvent{
-				App:       appName,
-				Session:   sessionName,
-				Sender:    sender,
-				Content:   text,
-				Timestamp: now,
-				Color:     getRandomColor(),
-			}
-
-			// 如果内容里包含时间前缀（"发送者 09:30 内容"），尝试解析
-			if parsed := s.tryParseInlineMessage(text, sessionName, appName, now); parsed != nil {
-				event = parsed
-				event.Color = getRandomColor()
-			}
-
-			events = append(events, event)
-			// 消息发出后重置发送者（下一条消息可能是同一人连续发送）
+		// 先尝试解析内联格式（"发送者 09:30 内容"）
+		if parsed := s.tryParseInlineMessage(text, sessionName, appName, now); parsed != nil {
+			parsed.Color = getRandomColor()
+			events = append(events, parsed)
+			lastSender = parsed.Sender
 			currentSender = ""
 			currentTime = ""
+			continue
 		}
+
+		// 确定发送者：优先使用已识别的 currentSender，其次从内容中提取，再次使用上一条的发送者
+		sender := currentSender
+		content := text
+
+		if sender == "" {
+			// 尝试从 "发送者: 内容" 格式中提取
+			if extracted := s.extractSenderFromContent(text); extracted != "" {
+				sender = extracted
+				// 从内容中去掉发送者前缀
+				for _, sep := range []string{": ", "：", ":"} {
+					if idx := strings.Index(text, sep); idx > 0 {
+						candidate := strings.TrimSpace(text[:idx])
+						if candidate == sender {
+							content = strings.TrimSpace(text[idx+len(sep):])
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if sender == "" && lastSender != "" {
+			// 连续消息场景：同一人连发多条时钉钉不重复显示名字
+			sender = lastSender
+		}
+
+		if sender == "" {
+			sender = "未知"
+		}
+
+		event := &MessageEvent{
+			App:       appName,
+			Session:   sessionName,
+			Sender:    sender,
+			Content:   content,
+			RawTime:   currentTime,
+			Timestamp: now,
+			Color:     getRandomColor(),
+		}
+
+		events = append(events, event)
+		lastSender = sender
+		// 消息发出后重置发送者（下一条消息可能是不同人发送）
+		currentSender = ""
+		currentTime = ""
 	}
 
-	_ = currentTime
 	return events
 }
 
@@ -733,6 +761,7 @@ func (s *DingTalkSource) tryParseInlineMessage(text, sessionName, appName string
 	matches := inlineRe.FindStringSubmatch(text)
 	if len(matches) == 4 {
 		sender := strings.TrimSpace(matches[1])
+		rawTime := strings.TrimSpace(matches[2])
 		content := strings.TrimSpace(matches[3])
 		if sender != "" && content != "" && len([]rune(sender)) <= 20 {
 			return &MessageEvent{
@@ -740,6 +769,7 @@ func (s *DingTalkSource) tryParseInlineMessage(text, sessionName, appName string
 				Session:   sessionName,
 				Sender:    sender,
 				Content:   content,
+				RawTime:   rawTime,
 				Timestamp: ts,
 			}
 		}
@@ -857,7 +887,7 @@ func (s *DingTalkSource) processSnapshotsViaVLModel(handler MessageEventHandler)
 				continue
 			}
 
-			sender, content := parseVLModelMessageLine(line)
+			sender, rawTime, content := parseVLModelMessageLine(line)
 			if content == "" {
 				continue
 			}
@@ -867,6 +897,7 @@ func (s *DingTalkSource) processSnapshotsViaVLModel(handler MessageEventHandler)
 				Session:   shot.sessionName,
 				Sender:    sender,
 				Content:   content,
+				RawTime:   rawTime,
 				Timestamp: now,
 				Color:     getRandomColor(),
 			}
@@ -895,24 +926,42 @@ func (s *DingTalkSource) getVLModelPrompt() string {
 	return prompt.DefaultContent("vlmodel_message_extract")
 }
 
-// parseVLModelMessageLine 解析 VL 模型输出的单行消息（"发送者: 消息内容" 格式）
-// 若无法识别发送者，返回 "未知" 作为发送者
-func parseVLModelMessageLine(line string) (sender, content string) {
+// parseVLModelMessageLine 解析 VL 模型输出的单行消息
+// 支持两种格式：
+//   - "发送者 HH:MM: 消息内容"（带时间）
+//   - "发送者: 消息内容"（不带时间）
+//
+// 返回 sender, rawTime, content
+func parseVLModelMessageLine(line string) (sender, rawTime, content string) {
+	// 先尝试带时间的格式："发送者 HH:MM: 消息内容"
+	timeInlineRe := regexp.MustCompile(`^(.{1,30}?)\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*[:：]\s*(.+)$`)
+	matches := timeInlineRe.FindStringSubmatch(line)
+	if len(matches) == 4 {
+		sender = strings.TrimSpace(matches[1])
+		rawTime = strings.TrimSpace(matches[2])
+		content = strings.TrimSpace(matches[3])
+		if sender != "" && content != "" {
+			return sender, rawTime, content
+		}
+	}
+
+	// 再尝试不带时间的格式："发送者: 消息内容"
 	for _, sep := range []string{": ", "："} {
 		if idx := strings.Index(line, sep); idx > 0 {
 			candidate := strings.TrimSpace(line[:idx])
 			body := strings.TrimSpace(line[idx+len(sep):])
 			if candidate != "" && body != "" && len([]rune(candidate)) <= 30 {
-				return candidate, body
+				return candidate, "", body
 			}
 		}
 	}
+
 	// 无法识别格式，整行作为内容
 	trimmed := strings.TrimSpace(line)
 	if trimmed != "" {
-		return "未知", trimmed
+		return "未知", "", trimmed
 	}
-	return "", ""
+	return "", "", ""
 }
 
 // isDuplicate 检查消息是否已处理过（基于 SHA256 hash 去重）

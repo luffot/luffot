@@ -13,7 +13,8 @@ type MessageEvent struct {
 	Session   string    `json:"session"`    // 会话名称
 	Sender    string    `json:"sender"`     // 发送者
 	Content   string    `json:"content"`    // 消息内容
-	Timestamp time.Time `json:"timestamp"`  // 消息时间
+	RawTime   string    `json:"raw_time"`   // 消息中的原始时间戳（如 "09:30"、"昨天 14:20"）
+	Timestamp time.Time `json:"timestamp"`  // 消息抓取时间
 	AvatarURL string    `json:"avatar_url"` // 发送者头像 URL（可选）
 	Color     string    `json:"color"`      // 弹幕颜色，十六进制如 #FF5500（可选，默认蓝色）
 }
@@ -25,6 +26,7 @@ func (e *MessageEvent) ToStorageMessage() *storage.Message {
 		Session:   e.Session,
 		Sender:    e.Sender,
 		Content:   e.Content,
+		RawTime:   e.RawTime,
 		Timestamp: e.Timestamp,
 	}
 }

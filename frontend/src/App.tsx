@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
+import AgentPersonaPage from './pages/AgentPersonaPage'
 import MessagesPage from './pages/MessagesPage'
 import ModelConfigPage from './pages/ModelConfigPage'
 import AlertConfigPage from './pages/AlertConfigPage'
@@ -17,7 +18,8 @@ function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<MessagesPage />} />
+        <Route path="/" element={<AgentPersonaPage />} />
+        <Route path="/agent-persona" element={<AgentPersonaPage />} />
         <Route path="/messages" element={<MessagesPage />} />
         <Route path="/model" element={<ModelConfigPage />} />
         <Route path="/alert" element={<AlertConfigPage />} />
