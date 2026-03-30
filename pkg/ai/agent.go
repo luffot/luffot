@@ -68,10 +68,30 @@ type openAIResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// openAIStreamDelta OpenAI 流式响应的 delta 部分
+type openAIStreamDelta struct {
+	Content string `json:"content"`
+}
+
+// openAIStreamChoice OpenAI 流式响应的 choice 部分
+type openAIStreamChoice struct {
+	Delta openAIStreamDelta `json:"delta"`
+}
+
+// openAIStreamChunk OpenAI 流式响应的单个数据块
+type openAIStreamChunk struct {
+	Choices []openAIStreamChoice `json:"choices"`
+}
+
 // Agent AI 智能体，负责与 LLM 交互
 type Agent struct {
 	mu     sync.Mutex
 	memory *Memory
+
+	// PicoClaw 引擎（用于 LLM 调用）
+	engine *PicoClawEngine
+	// Provider 映射（providerName -> providerEntry）
+	providerMap map[string]providerEntry
 
 	// 当前是否正在思考（异步请求进行中）
 	isThinking bool
@@ -86,13 +106,33 @@ type Agent struct {
 }
 
 // NewAgent 创建 AI 智能体
+// engine：PicoClaw 引擎实例
 // onReply：回复完成时的回调（非流式模式使用）
 // onToken：流式 token 回调，每收到一个片段调用一次（nil 则退化为非流式）
-func NewAgent(memory *Memory, onReply func(reply string), onToken func(token string)) *Agent {
+func NewAgent(memory *Memory, engine *PicoClawEngine, onReply func(reply string), onToken func(token string)) *Agent {
+	// 构建所有 provider 的映射
+	providerMap := make(map[string]providerEntry)
+	if engine != nil {
+		cfg := config.Get().AI
+		for i := range cfg.Providers {
+			pCfg := &cfg.Providers[i]
+			if pCfg.APIKey == "" {
+				continue
+			}
+			provider := engine.GetProvider()
+			providerMap[pCfg.Name] = providerEntry{
+				provider: provider,
+				modelID:  pCfg.Model,
+			}
+		}
+	}
+
 	return &Agent{
-		memory:  memory,
-		onReply: onReply,
-		onToken: onToken,
+		memory:      memory,
+		engine:      engine,
+		providerMap: providerMap,
+		onReply:     onReply,
+		onToken:     onToken,
 	}
 }
 
@@ -101,26 +141,9 @@ func (a *Agent) aiConfig() *config.AIConfig {
 	return &config.Get().AI
 }
 
-// IsEnabled 是否启用 AI 功能（至少有一个 provider 配置了 APIKey）
+// IsEnabled 是否启用 AI 功能
 func (a *Agent) IsEnabled() bool {
-	cfg := a.aiConfig()
-	if !cfg.Enabled {
-		return false
-	}
-	for _, p := range cfg.Providers {
-		if p.APIKey != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// newHTTPClient 根据 provider 配置创建 HTTP 客户端
-func (a *Agent) newHTTPClient(providerCfg *config.AIProviderConfig) *http.Client {
-	timeout := a.aiConfig().GetEffectiveTimeout(providerCfg)
-	return &http.Client{
-		Timeout: time.Duration(timeout) * time.Second,
-	}
+	return a.engine != nil
 }
 
 // IsThinking 是否正在思考中（线程安全）
@@ -149,17 +172,7 @@ func (a *Agent) Chat(userInput string) {
 func (a *Agent) ChatWithProvider(userInput string, providerName string) {
 	if !a.IsEnabled() {
 		hint := "主人，我还没有配置 API Key 哦～请在 config.yaml 里填上 API Key 吧！🔑"
-		log.Printf("[AI] 未启用或未配置 API Key")
-		if a.onReply != nil {
-			a.onReply(hint)
-		}
-		return
-	}
-
-	providerCfg := a.aiConfig().GetProviderConfig(providerName)
-	if providerCfg == nil {
-		hint := "主人，找不到对应的 AI provider 配置哦～请检查 config.yaml 里的 providers 配置吧！🔑"
-		log.Printf("[AI] 找不到 provider 配置，providerName=%s", providerName)
+		log.Printf("[AI] 未启用或未配置 AI 引擎")
 		if a.onReply != nil {
 			a.onReply(hint)
 		}
@@ -181,50 +194,10 @@ func (a *Agent) ChatWithProvider(userInput string, providerName string) {
 			a.mu.Unlock()
 		}()
 
-		// 创建 Trace 追踪整个对话流程（业务功能级别）
-		lc := GetLangfuseClient()
-		var traceCtx *TraceContext
-		if lc.IsEnabled() {
-			traceCtx, _ = StartTrace(context.Background(), "agent-chat", "user", userInput, map[string]interface{}{
-				"provider": providerCfg.Provider,
-				"model":    providerCfg.Model,
-			})
-		}
-
-		// 优先走流式模式
-		if a.onToken != nil {
-			fullReply, err := a.callLLMStream(userInput, providerCfg, a.onToken, traceCtx)
-			if err != nil {
-				log.Printf("[AI] 流式调用 LLM 失败: %v", err)
-				errMsg := fmt.Sprintf("呜呜，小钉出错了 😢\n错误详情：%s", err.Error())
-				if a.onReply != nil {
-					a.onReply(errMsg)
-				}
-				// 结束 Trace
-				if traceCtx != nil {
-					traceCtx.End(context.Background(), errMsg)
-				}
-				return
-			}
-			a.memory.AddTurn(userInput, fullReply)
-			a.mu.Lock()
-			a.latestReply = fullReply
-			a.mu.Unlock()
-			// 流式完成后通知 onReply（用于将完整回复写入消息列表）
-			if a.onReply != nil {
-				a.onReply(fullReply)
-			}
-			// 结束 Trace
-			if traceCtx != nil {
-				traceCtx.End(context.Background(), fullReply)
-			}
-			return
-		}
-
-		// 非流式模式
-		reply, err := a.callLLM(userInput, providerCfg, traceCtx)
+		// 使用 PicoClaw 引擎进行对话
+		reply, err := a.engine.ChatDirect(context.Background(), userInput)
 		if err != nil {
-			log.Printf("[AI] 调用 LLM 失败: %v", err)
+			log.Printf("[AI] 调用 PicoClaw 失败: %v", err)
 			reply = fmt.Sprintf("呜呜，小钉出错了 😢\n错误详情：%s", err.Error())
 		}
 
@@ -237,146 +210,7 @@ func (a *Agent) ChatWithProvider(userInput string, providerName string) {
 		if a.onReply != nil {
 			a.onReply(reply)
 		}
-
-		// 结束 Trace
-		if traceCtx != nil {
-			traceCtx.End(context.Background(), reply)
-		}
 	}()
-}
-
-// callLLMStream 流式调用 LLM，每收到一个 token 片段就调用 onToken 回调
-// 返回完整的回复文本
-// traceCtx: 可选的 Trace 上下文，如果提供则在此 Trace 下创建 Generation
-func (a *Agent) callLLMStream(userInput string, providerCfg *config.AIProviderConfig, onToken func(token string), traceCtx *TraceContext) (string, error) {
-	messages := a.buildMessages(userInput)
-	timeout := a.aiConfig().GetEffectiveTimeout(providerCfg)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
-
-	// 创建Langfuse Generation（在传入的 Trace 下）
-	lc := GetLangfuseClient()
-	var genCtx *GenerationContext
-	if lc.IsEnabled() && traceCtx != nil {
-		genCtx, _ = traceCtx.StartGeneration(context.Background(), "llm-call-stream", providerCfg.Model, messages)
-	}
-
-	startTime := time.Now()
-	var reply string
-	var err error
-
-	switch providerCfg.Provider {
-	case config.ProviderDashScope:
-		reply, err = a.doStreamRequestDashScope(ctx, messages, providerCfg, onToken)
-	case config.ProviderCoPaw:
-		reply, err = a.doStreamRequestCoPaw(ctx, userInput, providerCfg, onToken)
-	default:
-		reply, err = a.doStreamRequestOpenAICompat(ctx, messages, providerCfg, onToken)
-	}
-
-	duration := time.Since(startTime)
-
-	// 更新Generation
-	if genCtx != nil {
-		inputTokens := CalculateMessagesTokens(messages)
-		outputTokens := CalculateTokens(reply)
-		genCtx.End(context.Background(), reply, inputTokens, outputTokens)
-		log.Printf("[Langfuse] 流式调用完成，耗时: %v, 输入token: %d, 输出token: %d", duration, inputTokens, outputTokens)
-	}
-
-	return reply, err
-}
-
-// openAIStreamDelta OpenAI SSE 流式响应中的 delta 字段
-type openAIStreamDelta struct {
-	Content string `json:"content"`
-}
-
-// openAIStreamChoice OpenAI SSE 流式响应中的 choice 字段
-type openAIStreamChoice struct {
-	Delta        openAIStreamDelta `json:"delta"`
-	FinishReason string            `json:"finish_reason"`
-}
-
-// openAIStreamChunk OpenAI SSE 流式响应的单个数据块
-type openAIStreamChunk struct {
-	Choices []openAIStreamChoice `json:"choices"`
-}
-
-// doStreamRequestOpenAICompat 使用 OpenAI 兼容接口发起流式请求（SSE）
-func (a *Agent) doStreamRequestOpenAICompat(ctx context.Context, messages []ChatMessage, providerCfg *config.AIProviderConfig, onToken func(token string)) (string, error) {
-	reqBody := openAIRequest{
-		Model:    providerCfg.Model,
-		Messages: messages,
-		Stream:   true,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("序列化请求失败: %w", err)
-	}
-
-	requestURL := resolveBaseURL(providerCfg) + "/chat/completions"
-	log.Printf("[AI] 发起流式请求 provider=%s url=%s model=%s", providerCfg.Provider, requestURL, providerCfg.Model)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
-	req.Header.Set("Accept", "text/event-stream")
-
-	httpClient := a.newHTTPClient(providerCfg)
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("HTTP 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyContent, _ := io.ReadAll(resp.Body)
-		log.Printf("[AI] 流式请求错误响应体: %s", string(bodyContent))
-		var errResp openAIResponse
-		if jsonErr := json.Unmarshal(bodyContent, &errResp); jsonErr == nil && errResp.Error != nil {
-			return "", fmt.Errorf("API 返回错误 (HTTP %d): %s", resp.StatusCode, errResp.Error.Message)
-		}
-		return "", fmt.Errorf("API 返回非预期状态码 (HTTP %d)，响应: %s", resp.StatusCode, string(bodyContent))
-	}
-
-	var fullReply strings.Builder
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			break
-		}
-
-		var chunk openAIStreamChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			log.Printf("[AI] 解析 SSE chunk 失败: %v, data=%s", err, data)
-			continue
-		}
-
-		for _, choice := range chunk.Choices {
-			token := choice.Delta.Content
-			if token == "" {
-				continue
-			}
-			fullReply.WriteString(token)
-			onToken(token)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fullReply.String(), fmt.Errorf("读取 SSE 流失败: %w", err)
-	}
-
-	return strings.TrimSpace(fullReply.String()), nil
 }
 
 // dashScopeStreamChunk DashScope SSE 流式响应的单个数据块
@@ -393,104 +227,29 @@ type dashScopeStreamChunk struct {
 	Message string `json:"message"`
 }
 
-// doStreamRequestDashScope 使用 DashScope 原生接口发起流式请求（SSE）
-func (a *Agent) doStreamRequestDashScope(ctx context.Context, messages []ChatMessage, providerCfg *config.AIProviderConfig, onToken func(token string)) (string, error) {
-	var reqBody dashScopeRequest
-	reqBody.Model = providerCfg.Model
-	reqBody.Input.Messages = messages
-	reqBody.Parameters.ResultFormat = "message"
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("序列化请求失败: %w", err)
-	}
-
-	requestURL := resolveBaseURL(providerCfg) + "/services/aigc/text-generation/generation"
-	log.Printf("[AI] DashScope 流式请求 url=%s model=%s", requestURL, providerCfg.Model)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
-	// DashScope 流式模式需要设置此 header
-	req.Header.Set("X-DashScope-SSE", "enable")
-	req.Header.Set("Accept", "text/event-stream")
-
-	httpClient := a.newHTTPClient(providerCfg)
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("HTTP 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyContent, _ := io.ReadAll(resp.Body)
-		log.Printf("[AI] DashScope 流式请求错误响应体: %s", string(bodyContent))
-		return "", fmt.Errorf("DashScope API 返回非预期状态码 (HTTP %d)，响应: %s", resp.StatusCode, string(bodyContent))
-	}
-
-	// DashScope SSE 流式返回的是增量内容，需要拼接
-	var fullReply strings.Builder
-	var lastContent string
-
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" {
-			continue
-		}
-
-		var chunk dashScopeStreamChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			log.Printf("[AI] 解析 DashScope SSE chunk 失败: %v, data=%s", err, data)
-			continue
-		}
-
-		if chunk.Code != "" {
-			return fullReply.String(), fmt.Errorf("DashScope API 错误 (code=%s): %s", chunk.Code, chunk.Message)
-		}
-
-		// DashScope 流式返回的是累积内容，需要计算增量
-		var currentContent string
-		if len(chunk.Output.Choices) > 0 {
-			currentContent = chunk.Output.Choices[0].Message.Content
-		} else if chunk.Output.Text != "" {
-			currentContent = chunk.Output.Text
-		}
-
-		if len(currentContent) > len(lastContent) {
-			newToken := currentContent[len(lastContent):]
-			lastContent = currentContent
-			fullReply.WriteString(newToken)
-			onToken(newToken)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fullReply.String(), fmt.Errorf("读取 DashScope SSE 流失败: %w", err)
-	}
-
-	return strings.TrimSpace(fullReply.String()), nil
-}
-
 // ChatSync 同步调用 LLM，使用自定义消息列表（不依赖对话记忆），使用指定 provider。
 // 适用于定时任务、后台分析等需要同步结果的场景。
 // providerName 为空时使用默认 provider。
 func (a *Agent) ChatSync(ctx context.Context, messages []ChatMessage, providerName string) (string, error) {
 	if !a.IsEnabled() {
-		return "", fmt.Errorf("AI 未启用或未配置 API Key")
+		return "", fmt.Errorf("AI 未启用或未配置引擎")
 	}
-	providerCfg := a.aiConfig().GetProviderConfig(providerName)
-	if providerCfg == nil {
-		return "", fmt.Errorf("找不到 provider 配置: %s", providerName)
+
+	// 将 ChatMessage 转换为 PicoClaw 格式
+	// PicoClaw 的 ProcessDirect 接受纯文本输入，不直接支持消息列表
+	// 这里简化处理：将最后一条消息作为输入
+	if len(messages) == 0 {
+		return "", fmt.Errorf("消息列表为空")
 	}
-	return a.doRequest(ctx, messages, providerCfg)
+
+	// 使用最后一条消息的内容作为输入
+	lastMessage := messages[len(messages)-1]
+	reply, err := a.engine.ChatDirect(ctx, lastMessage.Content)
+	if err != nil {
+		return "", fmt.Errorf("PicoClaw 调用失败: %w", err)
+	}
+
+	return reply, nil
 }
 
 // SummarizeMessages 让 AI 总结一批消息（用于紧急消息智能摘要），使用默认 provider
@@ -504,85 +263,16 @@ func (a *Agent) SummarizeMessagesWithProvider(messages []string, providerName st
 		return ""
 	}
 
-	providerCfg := a.aiConfig().GetProviderConfig(providerName)
-	if providerCfg == nil {
-		return ""
-	}
-
 	content := strings.Join(messages, "\n")
 	prompt := fmt.Sprintf("请用一句话（30字以内）总结以下消息的核心内容，语气活泼简洁：\n%s", content)
 
-	chatMessages := a.buildMessages(prompt)
-	timeout := a.aiConfig().GetEffectiveTimeout(providerCfg)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
-
-	reply, err := a.doRequest(ctx, chatMessages, providerCfg)
+	// 使用 PicoClaw 引擎进行总结
+	reply, err := a.engine.ChatDirect(context.Background(), prompt)
 	if err != nil {
+		log.Printf("[AI] 总结消息失败: %v", err)
 		return ""
 	}
 	return reply
-}
-
-// callLLM 调用 LLM 接口（同步，在 goroutine 中调用）
-// traceCtx: 可选的 Trace 上下文，如果提供则在此 Trace 下创建 Generation
-func (a *Agent) callLLM(userInput string, providerCfg *config.AIProviderConfig, traceCtx *TraceContext) (string, error) {
-	messages := a.buildMessages(userInput)
-	timeout := a.aiConfig().GetEffectiveTimeout(providerCfg)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
-
-	// 创建Langfuse Generation（在传入的 Trace 下）
-	lc := GetLangfuseClient()
-	var genCtx *GenerationContext
-	if lc.IsEnabled() && traceCtx != nil {
-		genCtx, _ = traceCtx.StartGeneration(context.Background(), "llm-call", providerCfg.Model, messages)
-	}
-
-	startTime := time.Now()
-	reply, err := a.doRequest(ctx, messages, providerCfg)
-	duration := time.Since(startTime)
-
-	// 更新Generation
-	if genCtx != nil {
-		inputTokens := CalculateMessagesTokens(messages)
-		outputTokens := CalculateTokens(reply)
-		genCtx.End(context.Background(), reply, inputTokens, outputTokens)
-		log.Printf("[Langfuse] 调用完成，耗时: %v, 输入token: %d, 输出token: %d", duration, inputTokens, outputTokens)
-	}
-
-	return reply, err
-}
-
-// buildMessages 构建完整的消息列表（系统 prompt + 用户画像上下文 + 历史上下文 + 当前输入）
-func (a *Agent) buildMessages(userInput string) []ChatMessage {
-	// 拼接 system prompt：从文件动态加载人设 + 用户画像（若存在）
-	fullSystemPrompt := loadSystemPrompt()
-	if userProfile := loadUserProfileForPrompt(); userProfile != "" {
-		fullSystemPrompt += fmt.Sprintf(`
-
----
-以下是主人的个人画像，请在回答时将其作为背景参考，让回答更贴合主人的实际情况：
-<主人画像>
-%s
-</主人画像>`, userProfile)
-	}
-
-	messages := []ChatMessage{
-		{Role: "system", Content: fullSystemPrompt},
-	}
-
-	// 加入历史上下文（短期记忆）
-	history := a.memory.GetRecentContext()
-	messages = append(messages, history...)
-
-	// 加入当前用户输入
-	messages = append(messages, ChatMessage{
-		Role:    "user",
-		Content: userInput,
-	})
-
-	return messages
 }
 
 // resolveBaseURL 根据 provider 配置返回最终使用的 base URL（包级函数，供各请求方法复用）
@@ -603,97 +293,6 @@ func resolveBaseURL(providerCfg *config.AIProviderConfig) string {
 		// 未配置 provider 时默认走 OpenAI 兼容格式
 		return "https://api.openai.com/v1"
 	}
-}
-
-// doRequest 根据 provider 选择对应的接口规范发起请求
-// 注意：此方法不再创建 Trace/Generation，Trace 应在业务层创建
-func (a *Agent) doRequest(ctx context.Context, messages []ChatMessage, providerCfg *config.AIProviderConfig) (string, error) {
-	// 此方法不再创建 Langfuse Trace/Generation
-	// Trace 应在业务层（如 Chat、Analyzer）创建
-
-	switch providerCfg.Provider {
-	case config.ProviderDashScope:
-		return a.doRequestDashScope(ctx, messages, providerCfg)
-	case config.ProviderCoPaw:
-		// CoPaw 使用 OpenAI 兼容接口
-		return a.doRequestOpenAICompat(ctx, messages, providerCfg)
-	default:
-		return a.doRequestOpenAICompat(ctx, messages, providerCfg)
-	}
-}
-
-// doRequestOpenAICompat 使用 OpenAI 兼容接口发起请求
-// 适用于：OpenAI、阿里云百炼 compatible-mode、DeepSeek、Moonshot 等
-// 注意：此方法不再创建 Trace，只处理实际请求
-func (a *Agent) doRequestOpenAICompat(ctx context.Context, messages []ChatMessage, providerCfg *config.AIProviderConfig) (string, error) {
-	// 此方法不再创建 Langfuse Trace
-	// Trace 应在业务层创建
-
-	reqBody := openAIRequest{
-		Model:    providerCfg.Model,
-		Messages: messages,
-		Stream:   false,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("序列化请求失败: %w", err)
-	}
-
-	requestURL := resolveBaseURL(providerCfg) + "/chat/completions"
-	log.Printf("[AI] 发起请求 provider=%s url=%s model=%s apiKey=%s",
-		providerCfg.Provider, requestURL, providerCfg.Model, providerCfg.APIKey)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
-
-	httpClient := a.newHTTPClient(providerCfg)
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("HTTP 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("读取响应体失败: %w", err)
-	}
-
-	log.Printf("[AI] 响应状态码: %d", resp.StatusCode)
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("[AI] 错误响应体: %s", string(respBytes))
-		// 尝试解析 error 字段给出更友好的提示
-		var errResp openAIResponse
-		if jsonErr := json.Unmarshal(respBytes, &errResp); jsonErr == nil && errResp.Error != nil {
-			return "", fmt.Errorf("API 返回错误 (HTTP %d): %s", resp.StatusCode, errResp.Error.Message)
-		}
-		return "", fmt.Errorf("API 返回非预期状态码 (HTTP %d)，响应: %s", resp.StatusCode, string(respBytes))
-	}
-
-	var openAIResp openAIResponse
-	if err := json.Unmarshal(respBytes, &openAIResp); err != nil {
-		log.Printf("[AI] 响应体解析失败，原始内容: %s", string(respBytes))
-		return "", fmt.Errorf("解析响应失败: %w", err)
-	}
-
-	if openAIResp.Error != nil {
-		return "", fmt.Errorf("API 错误: %s", openAIResp.Error.Message)
-	}
-
-	if len(openAIResp.Choices) == 0 {
-		log.Printf("[AI] 响应体无 choices，原始内容: %s", string(respBytes))
-		return "", fmt.Errorf("API 返回空结果（choices 为空）")
-	}
-
-	reply := strings.TrimSpace(openAIResp.Choices[0].Message.Content)
-
-	return reply, nil
 }
 
 // dashScopeRequest DashScope 原生接口请求体
@@ -819,7 +418,7 @@ func (a *Agent) AnalyzeImageBase64(base64JPEG string, prompt string, providerNam
 	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
 	req.Header.Set("Accept", "text/event-stream")
 
-	httpClient := a.newHTTPClient(providerCfg)
+	httpClient := &http.Client{Timeout: time.Duration(timeout) * time.Second}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("视觉 HTTP 请求失败: %w", err)
@@ -878,147 +477,80 @@ func (a *Agent) AnalyzeImageBase64(base64JPEG string, prompt string, providerNam
 	return content, nil
 }
 
-// ── CoPaw 专用数据结构 ──────────────────────────────────────────────────────
-
-// copawContentPart CoPaw 请求消息内容块（type=text）
-type copawContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-// copawMessage CoPaw 请求消息体
-type copawMessage struct {
-	Role    string             `json:"role"`
-	Content []copawContentPart `json:"content"`
-}
-
-// copawRequest CoPaw /api/agent/process 接口请求体
-type copawRequest struct {
-	SessionID string         `json:"session_id"`
-	UserID    string         `json:"user_id"`
-	Input     []copawMessage `json:"input"`
-}
-
-// copawSSEChunk CoPaw SSE 流式响应的单个数据块
-// type 字段可能为：message / reasoning / heartbeat / error
-type copawSSEChunk struct {
-	Type    string `json:"type"`
-	Message *struct {
-		Role    string `json:"role"`
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	} `json:"message,omitempty"`
-	Error string `json:"error,omitempty"`
-}
-
-// doStreamRequestCoPaw 调用本地 CoPaw Agent 的流式接口（SSE）
-// CoPaw 不使用 OpenAI 格式，而是 agentscope_runtime 的 /api/agent/process 接口。
-// 每个 SSE data 块包含 type 字段，type=message 时提取 content[].text 作为 token。
-func (a *Agent) doStreamRequestCoPaw(ctx context.Context, userInput string, providerCfg *config.AIProviderConfig, onToken func(token string)) (string, error) {
-	baseURL := resolveBaseURL(providerCfg)
-
-	// CoPaw 使用 session_id 维护对话上下文，user_id 标识用户
-	// session_id 从 provider 的 Model 字段读取（复用该字段存储 session 名），
-	// 若未配置则使用默认值 "luffot"
-	sessionID := providerCfg.Model
-	if sessionID == "" {
-		sessionID = "luffot"
+// doRequest 使用 OpenAI 兼容协议发起 LLM 请求（非流式），返回 AI 回复文本。
+// 适用于 analyzer 等需要自定义消息列表和指定 provider 的内部调用场景。
+// 当 provider 为 DashScope 原生协议时自动切换到 doRequestDashScope。
+func (a *Agent) doRequest(ctx context.Context, messages []ChatMessage, providerCfg *config.AIProviderConfig) (string, error) {
+	if providerCfg == nil {
+		return "", fmt.Errorf("provider 配置为空")
 	}
-	userID := "luffot-pet"
 
-	reqBody := copawRequest{
-		SessionID: sessionID,
-		UserID:    userID,
-		Input: []copawMessage{
-			{
-				Role: "user",
-				Content: []copawContentPart{
-					{Type: "text", Text: userInput},
-				},
-			},
-		},
+	// DashScope 原生协议走专用方法
+	if providerCfg.Provider == config.ProviderDashScope {
+		return a.doRequestDashScope(ctx, messages, providerCfg)
+	}
+
+	reqBody := openAIRequest{
+		Model:    providerCfg.Model,
+		Messages: messages,
+		Stream:   false,
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("序列化 CoPaw 请求失败: %w", err)
+		return "", fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	requestURL := baseURL + "/api/agent/process"
-	log.Printf("[AI] CoPaw 流式请求 url=%s sessionID=%s", requestURL, sessionID)
+	requestURL := resolveBaseURL(providerCfg) + "/chat/completions"
+	log.Printf("[AI] doRequest url=%s model=%s", requestURL, providerCfg.Model)
 
+	timeout := a.aiConfig().GetEffectiveTimeout(providerCfg)
 	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return "", fmt.Errorf("创建 CoPaw 请求失败: %w", err)
+		return "", fmt.Errorf("创建请求失败: %w", err)
 	}
+
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
 
-	// CoPaw 本地服务无需鉴权，超时使用全局配置
-	timeout := a.aiConfig().GetEffectiveTimeout(providerCfg)
 	httpClient := &http.Client{Timeout: time.Duration(timeout) * time.Second}
-
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("CoPaw HTTP 请求失败: %w", err)
+		return "", fmt.Errorf("HTTP 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应体失败: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK {
-		bodyContent, _ := io.ReadAll(resp.Body)
-		log.Printf("[AI] CoPaw 错误响应: %s", string(bodyContent))
-		return "", fmt.Errorf("CoPaw API 返回非预期状态码 (HTTP %d): %s", resp.StatusCode, string(bodyContent))
+		log.Printf("[AI] 错误响应体: %s", string(respBytes))
+		var errResp openAIResponse
+		if jsonErr := json.Unmarshal(respBytes, &errResp); jsonErr == nil && errResp.Error != nil {
+			return "", fmt.Errorf("LLM API 错误 (HTTP %d): %s", resp.StatusCode, errResp.Error.Message)
+		}
+		return "", fmt.Errorf("LLM API 返回非预期状态码 (HTTP %d): %s", resp.StatusCode, string(respBytes))
 	}
 
-	var fullReply strings.Builder
-	scanner := bufio.NewScanner(resp.Body)
-	// 扩大 scanner 缓冲区，防止长行截断
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
-			continue
-		}
-
-		var chunk copawSSEChunk
-		if parseErr := json.Unmarshal([]byte(data), &chunk); parseErr != nil {
-			log.Printf("[AI] 解析 CoPaw SSE chunk 失败: %v, data=%s", parseErr, data)
-			continue
-		}
-
-		switch chunk.Type {
-		case "message":
-			// 提取 assistant 消息中的文本内容
-			if chunk.Message == nil {
-				continue
-			}
-			for _, part := range chunk.Message.Content {
-				if part.Type == "text" && part.Text != "" {
-					fullReply.WriteString(part.Text)
-					onToken(part.Text)
-				}
-			}
-		case "error":
-			if chunk.Error != "" {
-				return fullReply.String(), fmt.Errorf("CoPaw Agent 返回错误: %s", chunk.Error)
-			}
-			// heartbeat / reasoning 等类型忽略，不展示给用户
-		}
+	var openAIResp openAIResponse
+	if err := json.Unmarshal(respBytes, &openAIResp); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
 	}
 
-	if scanErr := scanner.Err(); scanErr != nil {
-		return fullReply.String(), fmt.Errorf("读取 CoPaw SSE 流失败: %w", scanErr)
+	if openAIResp.Error != nil {
+		return "", fmt.Errorf("LLM API 错误: %s", openAIResp.Error.Message)
 	}
 
-	return strings.TrimSpace(fullReply.String()), nil
+	if len(openAIResp.Choices) == 0 {
+		return "", fmt.Errorf("LLM API 返回空结果")
+	}
+
+	return strings.TrimSpace(openAIResp.Choices[0].Message.Content), nil
 }
+
+// ── CoPaw 专用数据结构 ──────────────────────────────────────────────────────
 
 // doRequestDashScope 使用阿里云 DashScope 原生接口发起请求
 // 注意：此方法不再创建 Trace，只处理实际请求
@@ -1039,6 +571,7 @@ func (a *Agent) doRequestDashScope(ctx context.Context, messages []ChatMessage, 
 	requestURL := resolveBaseURL(providerCfg) + "/services/aigc/text-generation/generation"
 	log.Printf("[AI] DashScope 原生请求 url=%s model=%s", requestURL, providerCfg.Model)
 
+	timeout := a.aiConfig().GetEffectiveTimeout(providerCfg)
 	req, err := http.NewRequestWithContext(ctx, "POST", requestURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("创建请求失败: %w", err)
@@ -1047,7 +580,7 @@ func (a *Agent) doRequestDashScope(ctx context.Context, messages []ChatMessage, 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+providerCfg.APIKey)
 
-	httpClient := a.newHTTPClient(providerCfg)
+	httpClient := &http.Client{Timeout: time.Duration(timeout) * time.Second}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("HTTP 请求失败: %w", err)

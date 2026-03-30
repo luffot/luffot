@@ -1,7 +1,7 @@
 package camera
 
 /*
-#cgo CFLAGS: -x objective-c
+#cgo CFLAGS: -x objective-c -mmacosx-version-min=10.15
 #cgo LDFLAGS: -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework Foundation
 
 #import <AVFoundation/AVFoundation.h>

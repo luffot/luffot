@@ -135,14 +135,28 @@ func Run() {
 	// 初始化 AI 模块
 	var aiAgent *ai.Agent
 	var aiTools *ai.MessageQueryTools
+	var picoEngine *ai.PicoClawEngine
 	if cfg.AI.Enabled {
 		fmt.Print("正在初始化 AI 智能体... ")
 		aiMemory, memErr := ai.NewMemory(dbPath, cfg.AI.MaxContextRounds)
 		if memErr != nil {
 			fmt.Printf("记忆模块初始化失败（将跳过 AI 功能）：%v\n", memErr)
 		} else {
+			// 创建 PicoClaw 引擎
+			var engineErr error
+			picoEngine, engineErr = ai.NewPicoClawEngine(&cfg.AI)
+			if engineErr != nil {
+				log.Printf("[AI] PicoClaw 引擎创建失败: %v", engineErr)
+			}
+
+			// 创建消息查询工具并注册到 PicoClaw
 			aiTools = ai.NewMessageQueryTools(st)
-			aiAgent = ai.NewAgent(aiMemory, nil, nil)
+			if picoEngine != nil {
+				ai.RegisterLuffotTools(picoEngine, aiTools)
+				picoEngine.Start()
+			}
+
+			aiAgent = ai.NewAgent(aiMemory, picoEngine, nil, nil)
 
 			if !aiAgent.IsEnabled() {
 				fmt.Println("完成（注意：providers 中未配置有效的 api_key，AI 对话功能不可用）")
@@ -358,6 +372,9 @@ func Run() {
 		}
 		if reactiveAIChain != nil {
 			reactiveAIChain.Stop()
+		}
+		if picoEngine != nil {
+			picoEngine.Close()
 		}
 
 		fmt.Println("已退出")
