@@ -443,14 +443,35 @@ const (
 	DingTalkSourceModeAccessibility DingTalkSourceMode = "accessibility"
 	// DingTalkSourceModeVLModel 截图后调用视觉模型识别消息（更准确）
 	DingTalkSourceModeVLModel DingTalkSourceMode = "vlmodel"
+	// DingTalkSourceModeDWS 使用 DWS CLI 工具获取消息（推荐，需要配置 DWS）
+	DingTalkSourceModeDWS DingTalkSourceMode = "dws"
 )
+
+// DWSConfig DWS CLI 配置
+type DWSConfig struct {
+	// ClientID DWS App Key
+	ClientID string `yaml:"client_id" json:"client_id"`
+	// ClientSecret DWS App Secret
+	ClientSecret string `yaml:"client_secret" json:"client_secret"`
+	// PollInterval 轮询间隔（秒），默认 10
+	PollInterval int `yaml:"poll_interval" json:"poll_interval"`
+	// MaxResults 每次轮询获取的最大消息数，默认 50
+	MaxResults int `yaml:"max_results" json:"max_results"`
+	// Conversations 要监听的会话 ID 列表（openConversationId），为空则监听所有
+	Conversations []string `yaml:"conversations" json:"conversations"`
+	// DWSBinaryPath DWS 可执行文件路径，为空则使用系统 PATH 中的 dws
+	DWSBinaryPath string `yaml:"dws_binary_path" json:"dws_binary_path"`
+}
 
 // DingTalkConfig 钉钉专属配置
 type DingTalkConfig struct {
-	// SourceMode 消息读取方式：accessibility（默认）或 vlmodel
+	// SourceMode 消息读取方式：accessibility（默认）、vlmodel 或 dws
 	// - accessibility：通过 macOS Accessibility API 读取窗口文本，速度快但可能不准确
 	// - vlmodel：截图后调用视觉模型识别消息，准确但需要配置 vlmodel provider
+	// - dws：使用 DWS CLI 工具获取消息，最稳定但需要配置 DWS 认证
 	SourceMode DingTalkSourceMode `yaml:"source_mode" json:"source_mode"`
+	// DWS DWS CLI 配置（当 source_mode=dws 时生效）
+	DWS DWSConfig `yaml:"dws" json:"dws"`
 }
 
 // ProcessMonitorConfig 进程监控配置（通用）

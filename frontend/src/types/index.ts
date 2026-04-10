@@ -40,8 +40,18 @@ export interface SessionConfig {
   script?: string;
 }
 
+export interface DWSConfig {
+  client_id?: string;
+  client_secret?: string;
+  poll_interval?: number;
+  max_results?: number;
+  conversations?: string[];
+  dws_binary_path?: string;
+}
+
 export interface DingTalkConfig {
   source_mode: string;
+  dws?: DWSConfig;
 }
 
 export interface ProcessMonitorConfig {

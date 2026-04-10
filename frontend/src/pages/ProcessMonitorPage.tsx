@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Monitor, Plus, Trash2, Save, AlertCircle, FileText, ChevronDown, ChevronRight } from 'lucide-react'
 import { wailsAPI } from '../lib/wails'
-import type { AppConfigItem } from '../types'
+import type { AppConfigItem, DingTalkConfig } from '../types'
 
 // 进程监控相关的提示词名称常量
 const PROCESS_PROMPT_NAMES = ['analyzer_importance_system', 'analyzer_importance_user', 'analyzer_profile_system', 'analyzer_profile_user', 'vlmodel_message_extract']
@@ -35,6 +35,17 @@ export default function ProcessMonitorPage() {
     },
     session_config: {
       source: 'window_title',
+    },
+    dingtalk: {
+      source_mode: 'accessibility',
+      dws: {
+        client_id: '',
+        client_secret: '',
+        poll_interval: 10,
+        max_results: 50,
+        conversations: [],
+        dws_binary_path: '',
+      },
     },
     process_monitor: {
       use_vlmodel: false,
@@ -124,6 +135,17 @@ export default function ProcessMonitorPage() {
         },
         session_config: {
           source: 'window_title',
+        },
+        dingtalk: {
+          source_mode: 'accessibility',
+          dws: {
+            client_id: '',
+            client_secret: '',
+            poll_interval: 10,
+            max_results: 50,
+            conversations: [],
+            dws_binary_path: '',
+          },
         },
         process_monitor: {
           use_vlmodel: false,
@@ -330,63 +352,350 @@ export default function ProcessMonitorPage() {
                         </label>
                       </div>
                     </div>
-                    {/* VLModel Settings */}
-                    <div className="border-t border-gray-100 pt-4">
-                      <h4 className="font-medium text-gray-900 mb-3">VLModel 设置</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="form-group mb-0">
-                          <label className="flex items-center gap-2 cursor-pointer">
+                    {/* 钉钉消息源模式选择 */}
+                    {editingApp.name === 'dingtalk' && (
+                      <div className="border-t border-gray-100 pt-4">
+                        <h4 className="font-medium text-gray-900 mb-3">钉钉消息源配置</h4>
+                        <div className="space-y-4">
+                          {/* 消息源模式选择 */}
+                          <div className="form-group mb-0">
+                            <label className="form-label">消息源模式</label>
+                            <select
+                              value={editingApp.dingtalk?.source_mode || 'accessibility'}
+                              onChange={(e) => {
+                                const newSourceMode = e.target.value;
+                                const currentDws = editingApp.dingtalk?.dws || { 
+                                  client_id: '', 
+                                  client_secret: '', 
+                                  poll_interval: 10, 
+                                  max_results: 50, 
+                                  conversations: [], 
+                                  dws_binary_path: '' 
+                                };
+                                setEditingApp({
+                                  ...editingApp,
+                                  dingtalk: {
+                                    source_mode: newSourceMode,
+                                    dws: currentDws,
+                                  },
+                                });
+                              }}
+                              className="form-input"
+                            >
+                              <option value="accessibility">Accessibility API（默认）</option>
+                              <option value="vlmodel">VLModel 视觉识别</option>
+                              <option value="dws">DWS CLI 工具</option>
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {editingApp.dingtalk?.source_mode === 'dws' && '通过 DWS CLI 轮询获取消息，最稳定但需要配置 DWS 认证'}
+                              {editingApp.dingtalk?.source_mode === 'vlmodel' && '截图后调用视觉模型识别消息，准确但需要配置 VLModel Provider'}
+                              {(!editingApp.dingtalk?.source_mode || editingApp.dingtalk?.source_mode === 'accessibility') && '通过 macOS Accessibility API 读取窗口文本，速度快但可能不准确'}
+                            </p>
+                          </div>
+
+                          {/* DWS 配置 */}
+                          {editingApp.dingtalk?.source_mode === 'dws' && (
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-4">
+                              <h5 className="font-medium text-blue-900">DWS 认证配置</h5>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="form-group mb-0">
+                                  <label className="form-label">Client ID (AppKey)</label>
+                                  <input
+                                    type="text"
+                                    value={editingApp.dingtalk?.dws?.client_id || ''}
+                                    onChange={(e) => {
+                                      const currentDws = editingApp.dingtalk?.dws || { 
+                                        client_id: '', 
+                                        client_secret: '', 
+                                        poll_interval: 10, 
+                                        max_results: 50, 
+                                        conversations: [], 
+                                        dws_binary_path: '' 
+                                      };
+                                      const currentSourceMode = editingApp.dingtalk?.source_mode || 'dws';
+                                      const dingtalkConfig: DingTalkConfig = {
+                                        source_mode: currentSourceMode,
+                                        dws: {
+                                          ...currentDws,
+                                          client_id: e.target.value,
+                                        },
+                                      };
+                                      setEditingApp({
+                                        ...editingApp,
+                                        dingtalk: dingtalkConfig,
+                                      });
+                                    }}
+                                    placeholder="DingTalk AppKey"
+                                    className="form-input"
+                                  />
+                                </div>
+                                <div className="form-group mb-0">
+                                  <label className="form-label">Client Secret (AppSecret)</label>
+                                  <input
+                                    type="password"
+                                    value={editingApp.dingtalk?.dws?.client_secret || ''}
+                                    onChange={(e) => {
+                                      const currentDws = editingApp.dingtalk?.dws || { 
+                                        client_id: '', 
+                                        client_secret: '', 
+                                        poll_interval: 10, 
+                                        max_results: 50, 
+                                        conversations: [], 
+                                        dws_binary_path: '' 
+                                      };
+                                      const currentSourceMode = editingApp.dingtalk?.source_mode || 'dws';
+                                      const dingtalkConfig: DingTalkConfig = {
+                                        source_mode: currentSourceMode,
+                                        dws: {
+                                          ...currentDws,
+                                          client_secret: e.target.value,
+                                        },
+                                      };
+                                      setEditingApp({
+                                        ...editingApp,
+                                        dingtalk: dingtalkConfig,
+                                      });
+                                    }}
+                                    placeholder="DingTalk AppSecret"
+                                    className="form-input"
+                                  />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="form-group mb-0">
+                                  <label className="form-label">轮询间隔（秒）</label>
+                                  <input
+                                    type="number"
+                                    min={5}
+                                    max={300}
+                                    value={editingApp.dingtalk?.dws?.poll_interval || 10}
+                                    onChange={(e) => {
+                                      const currentDws = editingApp.dingtalk?.dws || { 
+                                        client_id: '', 
+                                        client_secret: '', 
+                                        poll_interval: 10, 
+                                        max_results: 50, 
+                                        conversations: [], 
+                                        dws_binary_path: '' 
+                                      };
+                                      const currentSourceMode = editingApp.dingtalk?.source_mode || 'dws';
+                                      const dingtalkConfig: DingTalkConfig = {
+                                        source_mode: currentSourceMode,
+                                        dws: {
+                                          ...currentDws,
+                                          poll_interval: parseInt(e.target.value) || 10,
+                                        },
+                                      };
+                                      setEditingApp({
+                                        ...editingApp,
+                                        dingtalk: dingtalkConfig,
+                                      });
+                                    }}
+                                    className="form-input"
+                                  />
+                                </div>
+                                <div className="form-group mb-0">
+                                  <label className="form-label">最大消息数</label>
+                                  <input
+                                    type="number"
+                                    min={10}
+                                    max={200}
+                                    value={editingApp.dingtalk?.dws?.max_results || 50}
+                                    onChange={(e) => {
+                                      const currentDws = editingApp.dingtalk?.dws || { 
+                                        client_id: '', 
+                                        client_secret: '', 
+                                        poll_interval: 10, 
+                                        max_results: 50, 
+                                        conversations: [], 
+                                        dws_binary_path: '' 
+                                      };
+                                      const sm = editingApp.dingtalk?.source_mode || 'dws';
+                                      setEditingApp({
+                                        ...editingApp,
+                                        dingtalk: {
+                                          source_mode: sm,
+                                          dws: {
+                                            ...currentDws,
+                                            max_results: parseInt(e.target.value) || 50,
+                                          },
+                                        },
+                                      });
+                                    }}
+                                    className="form-input"
+                                  />
+                                </div>
+                                <div className="form-group mb-0">
+                                  <label className="form-label">DWS 路径（可选）</label>
+                                  <input
+                                    type="text"
+                                    value={editingApp.dingtalk?.dws?.dws_binary_path || ''}
+                                    onChange={(e) => {
+                                      const currentDws = editingApp.dingtalk?.dws || { 
+                                        client_id: '', 
+                                        client_secret: '', 
+                                        poll_interval: 10, 
+                                        max_results: 50, 
+                                        conversations: [], 
+                                        dws_binary_path: '' 
+                                      };
+                                      const sm = editingApp.dingtalk?.source_mode || 'dws';
+                                      setEditingApp({
+                                        ...editingApp,
+                                        dingtalk: {
+                                          source_mode: sm,
+                                          dws: {
+                                            ...currentDws,
+                                            dws_binary_path: e.target.value,
+                                          },
+                                        },
+                                      });
+                                    }}
+                                    placeholder="留空使用系统 PATH"
+                                    className="form-input"
+                                  />
+                                </div>
+                              </div>
+                              <div className="form-group mb-0">
+                                <label className="form-label">监听会话 ID（可选）</label>
+                                <input
+                                  type="text"
+                                  value={(editingApp.dingtalk?.dws?.conversations || []).join(',')}
+                                  onChange={(e) => {
+                                    const currentDws = editingApp.dingtalk?.dws || { 
+                                      client_id: '', 
+                                      client_secret: '', 
+                                      poll_interval: 10, 
+                                      max_results: 50, 
+                                      conversations: [], 
+                                      dws_binary_path: '' 
+                                    };
+                                    const sm = editingApp.dingtalk?.source_mode || 'dws';
+                                    setEditingApp({
+                                      ...editingApp,
+                                      dingtalk: {
+                                        source_mode: sm,
+                                        dws: {
+                                          ...currentDws,
+                                          conversations: e.target.value ? e.target.value.split(',').map(s => s.trim()) : [],
+                                        },
+                                      },
+                                    });
+                                  }}
+                                  placeholder="openConversationId1, openConversationId2（留空监听所有）"
+                                  className="form-input"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">多个会话 ID 用逗号分隔，留空则监听所有会话</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* VLModel 配置（当选择 vlmodel 模式时） */}
+                          {editingApp.dingtalk?.source_mode === 'vlmodel' && (
+                            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 space-y-4">
+                              <h5 className="font-medium text-purple-900">VLModel 配置</h5>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="form-group mb-0">
+                                  <label className="form-label">VLModel Provider</label>
+                                  <input
+                                    type="text"
+                                    value={editingApp.process_monitor?.vlmodel_provider || ''}
+                                    onChange={(e) => setEditingApp({
+                                      ...editingApp,
+                                      process_monitor: {
+                                        use_vlmodel: editingApp.process_monitor?.use_vlmodel || false,
+                                        vlmodel_provider: e.target.value,
+                                        vlmodel_prompt: editingApp.process_monitor?.vlmodel_prompt || '',
+                                      },
+                                    })}
+                                    placeholder="例如：vision"
+                                    className="form-input"
+                                  />
+                                </div>
+                                <div className="form-group mb-0">
+                                  <label className="form-label">提示词名称</label>
+                                  <input
+                                    type="text"
+                                    value={editingApp.process_monitor?.vlmodel_prompt || ''}
+                                    onChange={(e) => setEditingApp({
+                                      ...editingApp,
+                                      process_monitor: {
+                                        use_vlmodel: editingApp.process_monitor?.use_vlmodel || false,
+                                        vlmodel_provider: editingApp.process_monitor?.vlmodel_provider || '',
+                                        vlmodel_prompt: e.target.value,
+                                      },
+                                    })}
+                                    placeholder="留空使用默认"
+                                    className="form-input"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* VLModel Settings（非钉钉应用） */}
+                    {editingApp.name !== 'dingtalk' && (
+                      <div className="border-t border-gray-100 pt-4">
+                        <h4 className="font-medium text-gray-900 mb-3">VLModel 设置</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="form-group mb-0">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={editingApp.process_monitor?.use_vlmodel || false}
+                                onChange={(e) => setEditingApp({
+                                  ...editingApp,
+                                  process_monitor: {
+                                    use_vlmodel: e.target.checked,
+                                    vlmodel_provider: editingApp.process_monitor?.vlmodel_provider || '',
+                                    vlmodel_prompt: editingApp.process_monitor?.vlmodel_prompt || '',
+                                  },
+                                })}
+                                className="w-4 h-4 text-primary-600 rounded"
+                              />
+                              <span className="text-sm">启用 VLModel</span>
+                            </label>
+                          </div>
+                          <div className="form-group mb-0">
+                            <label className="form-label">VLModel Provider</label>
                             <input
-                              type="checkbox"
-                              checked={editingApp.process_monitor?.use_vlmodel || false}
+                              type="text"
+                              value={editingApp.process_monitor?.vlmodel_provider || ''}
                               onChange={(e) => setEditingApp({
                                 ...editingApp,
                                 process_monitor: {
-                                  ...editingApp.process_monitor,
-                                  use_vlmodel: e.target.checked,
+                                  use_vlmodel: editingApp.process_monitor?.use_vlmodel ?? false,
+                                  vlmodel_provider: e.target.value,
+                                  vlmodel_prompt: editingApp.process_monitor?.vlmodel_prompt || '',
                                 },
                               })}
-                              className="w-4 h-4 text-primary-600 rounded"
+                              placeholder="例如：vision"
+                              className="form-input"
                             />
-                            <span className="text-sm">启用 VLModel</span>
-                          </label>
-                        </div>
-                        <div className="form-group mb-0">
-                          <label className="form-label">VLModel Provider</label>
-                          <input
-                            type="text"
-                            value={editingApp.process_monitor?.vlmodel_provider || ''}
-                            onChange={(e) => setEditingApp({
-                              ...editingApp,
-                              process_monitor: {
-                                use_vlmodel: editingApp.process_monitor?.use_vlmodel ?? false,
-                                vlmodel_provider: e.target.value,
-                                vlmodel_prompt: editingApp.process_monitor?.vlmodel_prompt,
-                              },
-                            })}
-                            placeholder="例如：vision"
-                            className="form-input"
-                          />
-                        </div>
-                        <div className="form-group mb-0">
-                          <label className="form-label">提示词名称</label>
-                          <input
-                            type="text"
-                            value={editingApp.process_monitor?.vlmodel_prompt || ''}
-                            onChange={(e) => setEditingApp({
-                              ...editingApp,
-                              process_monitor: {
-                                use_vlmodel: editingApp.process_monitor?.use_vlmodel ?? false,
-                                vlmodel_provider: editingApp.process_monitor?.vlmodel_provider,
-                                vlmodel_prompt: e.target.value,
-                              },
-                            })}
-                            placeholder="留空使用默认"
-                            className="form-input"
-                          />
+                          </div>
+                          <div className="form-group mb-0">
+                            <label className="form-label">提示词名称</label>
+                            <input
+                              type="text"
+                              value={editingApp.process_monitor?.vlmodel_prompt || ''}
+                              onChange={(e) => setEditingApp({
+                                ...editingApp,
+                                process_monitor: {
+                                  use_vlmodel: editingApp.process_monitor?.use_vlmodel ?? false,
+                                  vlmodel_provider: editingApp.process_monitor?.vlmodel_provider || '',
+                                  vlmodel_prompt: e.target.value,
+                                },
+                              })}
+                              placeholder="留空使用默认"
+                              className="form-input"
+                            />
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
                     <div className="flex items-center gap-2 pt-2">
                       <button
                         onClick={() => handleSaveApp(editingApp)}
@@ -422,7 +731,17 @@ export default function ProcessMonitorPage() {
                           >
                             {app.enabled ? '运行中' : '已禁用'}
                           </span>
-                          {app.process_monitor?.use_vlmodel && (
+                          {app.dingtalk?.source_mode === 'dws' && (
+                            <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700">
+                              DWS
+                            </span>
+                          )}
+                          {app.dingtalk?.source_mode === 'vlmodel' && (
+                            <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">
+                              VLModel
+                            </span>
+                          )}
+                          {app.process_monitor?.use_vlmodel && app.name !== 'dingtalk' && (
                             <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">
                               VLModel
                             </span>

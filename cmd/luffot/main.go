@@ -201,29 +201,26 @@ func Run() {
 		fmt.Println("完成")
 	}
 
-	// 钉钉 Accessibility 监听源
+	// 钉钉消息监听源
 	for _, appCfg := range cfg.Apps {
 		if appCfg.Name == "dingtalk" && appCfg.Enabled {
-			checkInterval := cfg.GetCheckInterval()
-			useVLModel := appCfg.DingTalk.SourceMode == config.DingTalkSourceModeVLModel
-			var dingAgent *ai.Agent
-			if useVLModel && aiAgent != nil && aiAgent.IsEnabled() {
-				dingAgent = aiAgent
-				fmt.Printf("正在启动钉钉窗口监听（vlmodel 截图识别模式，轮询间隔：%v）... ", checkInterval)
-			} else {
-				if useVLModel {
-					fmt.Println("[警告] source_mode=vlmodel 但 AI 未启用，回退到 accessibility 模式")
-				}
-				fmt.Printf("正在启动钉钉窗口监听（accessibility 模式，轮询间隔：%v）... ", checkInterval)
+			sourceMode := appCfg.DingTalk.SourceMode
+			if sourceMode == "" {
+				sourceMode = config.DingTalkSourceModeAccessibility
 			}
 
-			dingSourceConfig := eventsource.DingTalkSourceConfig{
-				CheckInterval: checkInterval,
-				MaxCacheSize:  500,
-				Agent:         dingAgent,
+			// 根据模式输出不同的启动信息
+			switch sourceMode {
+			case config.DingTalkSourceModeDWS:
+				fmt.Printf("正在启动钉钉消息监听（DWS 模式）... ")
+			case config.DingTalkSourceModeVLModel:
+				fmt.Printf("正在启动钉钉消息监听（vlmodel 截图识别模式）... ")
+			default:
+				fmt.Printf("正在启动钉钉消息监听（accessibility 模式）... ")
 			}
 
-			dingSource := eventsource.NewDingTalkSource(dingSourceConfig)
+			// 创建统一的钉钉消息源
+			dingSource := eventsource.NewDingTalkUnifiedSource(appCfg, aiAgent)
 			msgManager.AddEventSource(dingSource)
 			fmt.Println("完成")
 			break
