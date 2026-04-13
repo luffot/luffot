@@ -16,10 +16,11 @@ import (
 // 整合所有智能体，提供统一的启动、停止和管理接口
 type ReactiveAIChain struct {
 	// 核心组件
-	agent       *Agent
-	coordinator *Coordinator
-	userTracker *UserTracker
-	eventBus    *eventbus.EventBus
+	agent          *Agent
+	coordinator    *Coordinator
+	actionExecutor *ActionExecutor
+	userTracker    *UserTracker
+	eventBus       *eventbus.EventBus
 
 	// 智能体
 	systemGuardian  *SystemGuardian
@@ -75,8 +76,12 @@ func NewReactiveAIChain(
 	// 设置洞察回调
 	chain.onInsight = chain.handleInsight
 
-	// 初始化协调器
-	chain.coordinator = NewCoordinator(agent, chain.onInsight)
+	// 初始化动作执行器
+	chain.actionExecutor = NewActionExecutor(chain.eventBus)
+	chain.actionExecutor.RegisterDefaultActions()
+
+	// 初始化协调器（传入 ActionExecutor）
+	chain.coordinator = NewCoordinator(agent, chain.actionExecutor, chain.onInsight)
 
 	// 初始化用户跟踪器
 	chain.userTracker = NewUserTracker(storage)

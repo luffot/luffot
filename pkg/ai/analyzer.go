@@ -8,34 +8,32 @@ import (
 	"time"
 
 	"github.com/luffot/luffot/pkg/config"
+	"github.com/luffot/luffot/pkg/eventbus"
 	"github.com/luffot/luffot/pkg/prompt"
 	"github.com/luffot/luffot/pkg/storage"
 )
 
-// AlertCallback 触发桌宠气泡通知的回调函数类型
-type AlertCallback func(message string)
-
 // IntelliAnalyzer 智能消息分析器
-// 定时从数据库拉取未分析的消息，用大模型判断重要性并推送气泡通知，
+// 定时从数据库拉取未分析的消息，用大模型判断重要性并通过 EventBus 发布事件，
 // 同时维护一份基于消息内容的个人画像和结构化用户记忆供后续分析使用。
 type IntelliAnalyzer struct {
 	agent         *Agent
 	storage       *storage.Storage
 	memoryManager *UserMemoryManager
-	onAlert       AlertCallback
+	eventBus      *eventbus.EventBus
 	batchCount    int // 已完成的批次数，用于控制画像更新频率
 }
 
 // NewIntelliAnalyzer 创建智能消息分析器
 // agent：AI 智能体（用于调用 LLM）
 // st：存储层（读取消息、读写分析状态和画像）
-// onAlert：有重要消息时触发的气泡通知回调
-func NewIntelliAnalyzer(agent *Agent, st *storage.Storage, onAlert AlertCallback) *IntelliAnalyzer {
+// eventBus：事件总线（用于发布重要通知事件）
+func NewIntelliAnalyzer(agent *Agent, st *storage.Storage, eventBus *eventbus.EventBus) *IntelliAnalyzer {
 	return &IntelliAnalyzer{
 		agent:         agent,
 		storage:       st,
 		memoryManager: NewUserMemoryManager(st, []string{"我"}),
-		onAlert:       onAlert,
+		eventBus:      eventBus,
 	}
 }
 
@@ -232,11 +230,21 @@ func (a *IntelliAnalyzer) runOneBatch(ctx context.Context) {
 		return
 	}
 
-	// 推送气泡通知
+	// 通过 EventBus 发布重要通知事件
 	for _, notice := range importantNotices {
-		log.Printf("[IntelliAnalyzer] 推送重要通知: %s", notice)
-		if a.onAlert != nil {
-			a.onAlert(notice)
+		log.Printf("[IntelliAnalyzer] 发布重要通知事件: %s", notice)
+		if a.eventBus != nil {
+			event := eventbus.NewEvent(
+				eventbus.AppMessageReceived,
+				"intelli_analyzer",
+				map[string]interface{}{
+					"content":  notice,
+					"priority": "high",
+					"source":   "ai_analysis",
+				},
+			).WithPriority(eventbus.PriorityHigh).
+				WithDescription(notice)
+			a.eventBus.Publish(event)
 		}
 	}
 

@@ -71,11 +71,13 @@ type OnInsightCallback func(insight *UserInsight)
 // 2. 聚合事件数据，生成用户状态视图
 // 3. 进行事件优先级排序与语义融合
 // 4. 向用户主动推送关键信息（通过桌宠汇报）
+// 5. 接收用户交互事件，解析意图并触发动作执行
 type Coordinator struct {
-	agent     *Agent
-	eventBus  *eventbus.EventBus
-	userState *UserState
-	onInsight OnInsightCallback
+	agent          *Agent
+	eventBus       *eventbus.EventBus
+	actionExecutor *ActionExecutor
+	userState      *UserState
+	onInsight      OnInsightCallback
 
 	// 事件聚合窗口
 	pendingEvents []*eventbus.Event
@@ -128,11 +130,12 @@ func DefaultCoordinatorReportStrategy() CoordinatorReportStrategy {
 }
 
 // NewCoordinator 创建响应式AI协调器
-func NewCoordinator(agent *Agent, onInsight OnInsightCallback) *Coordinator {
+func NewCoordinator(agent *Agent, actionExecutor *ActionExecutor, onInsight OnInsightCallback) *Coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Coordinator{
-		agent:    agent,
-		eventBus: eventbus.GetGlobalEventBus(),
+		agent:          agent,
+		eventBus:       eventbus.GetGlobalEventBus(),
+		actionExecutor: actionExecutor,
 		userState: &UserState{
 			CurrentActivities: make([]UserActivity, 0),
 			UpcomingTasks:     make([]UpcomingTask, 0),
@@ -196,6 +199,10 @@ func (c *Coordinator) subscribeEvents() {
 
 	// 应用事件
 	c.eventBus.Subscribe(eventbus.AppMessageReceived, c.handleAppEvent)
+
+	// 用户交互事件（用于触发动作执行）
+	c.eventBus.Subscribe(eventbus.VoiceCommandReceived, c.handleUserCommand)
+	c.eventBus.Subscribe(eventbus.EventType("user.action_triggered"), c.handleUserAction)
 	c.eventBus.Subscribe(eventbus.AppMessageUrgent, c.handleAppEvent)
 	// 订阅应用秘书的汇报事件
 	c.eventBus.Subscribe(eventbus.AppMessageBatchReport, c.handleAppBatchReport)
@@ -687,4 +694,102 @@ func (c *Coordinator) RemoveUpcomingTask(taskTitle string) {
 	}
 	c.userState.UpcomingTasks = newTasks
 	c.userState.LastUpdated = time.Now()
+}
+
+// handleUserCommand 处理用户语音命令
+func (c *Coordinator) handleUserCommand(event *eventbus.Event) {
+	log.Printf("[Coordinator] 收到用户语音命令: %v", event.Data)
+
+	// 提取用户输入
+	userInput, ok := event.Data["text"].(string)
+	if !ok || userInput == "" {
+		log.Println("[Coordinator] 无效的语音命令")
+		return
+	}
+
+	// 解析用户意图并执行动作
+	c.executeUserIntent(userInput, event)
+}
+
+// handleUserAction 处理用户交互动作（如点击气泡按钮）
+func (c *Coordinator) handleUserAction(event *eventbus.Event) {
+	log.Printf("[Coordinator] 收到用户交互动作: %v", event.Data)
+
+	// 提取动作类型和参数
+	actionType, ok := event.Data["action_type"].(string)
+	if !ok {
+		log.Println("[Coordinator] 无效的用户交互动作")
+		return
+	}
+
+	// 直接执行预定义的动作
+	intent := &UserIntent{
+		ActionType:    ActionType(actionType),
+		Parameters:    event.Data,
+		SourceEventID: event.ID,
+		Context:       event.Data,
+	}
+
+	c.executeIntent(intent)
+}
+
+// executeUserIntent 解析用户意图并执行对应动作
+func (c *Coordinator) executeUserIntent(userInput string, contextEvent *eventbus.Event) {
+	if c.actionExecutor == nil {
+		log.Println("[Coordinator] ActionExecutor 未初始化")
+		return
+	}
+
+	// 使用 LLM 解析用户意图
+	intent, err := c.actionExecutor.ParseUserIntent(c.ctx, c.agent, userInput, contextEvent)
+	if err != nil {
+		log.Printf("[Coordinator] 意图解析失败: %v", err)
+		// 发送错误通知给用户
+		c.sendNotification("意图解析失败", fmt.Sprintf("无法理解您的指令: %s", userInput))
+		return
+	}
+
+	// 执行解析后的意图
+	c.executeIntent(intent)
+}
+
+// executeIntent 执行用户意图
+func (c *Coordinator) executeIntent(intent *UserIntent) {
+	if c.actionExecutor == nil {
+		log.Println("[Coordinator] ActionExecutor 未初始化")
+		return
+	}
+
+	log.Printf("[Coordinator] 执行用户意图: %s", intent.ActionType)
+
+	// 调用 ActionExecutor 执行动作
+	result, err := c.actionExecutor.ExecuteAction(c.ctx, intent)
+	if err != nil {
+		log.Printf("[Coordinator] 动作执行失败: %v", err)
+		c.sendNotification("执行失败", fmt.Sprintf("动作 %s 执行失败: %v", intent.ActionType, err))
+		return
+	}
+
+	// 发送执行结果通知
+	if result.Success {
+		c.sendNotification("执行成功", result.Message)
+	} else {
+		c.sendNotification("执行失败", result.Error)
+	}
+}
+
+// sendNotification 发送通知给用户
+func (c *Coordinator) sendNotification(title, content string) {
+	if c.onInsight != nil {
+		insight := &UserInsight{
+			ID:        fmt.Sprintf("ins_%d", time.Now().UnixNano()),
+			Type:      InsightTypeAppNotification,
+			Title:     title,
+			Content:   content,
+			Priority:  5,
+			Source:    "coordinator",
+			CreatedAt: time.Now(),
+		}
+		c.onInsight(insight)
+	}
 }

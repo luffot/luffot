@@ -319,14 +319,8 @@ func (m *Manager) StartIntelliAnalyzer(ctx context.Context) {
 		return
 	}
 
-	// 气泡通知回调：调用 barrageDisplay.ShowAlert 发送桌宠气泡
-	onAlert := func(message string) {
-		if m.barrageDisplay != nil {
-			m.barrageDisplay.ShowAlert(message)
-		}
-	}
-
-	intelliAnalyzerInstance = ai.NewIntelliAnalyzer(agent, m.storage, onAlert)
+	// 使用 EventBus 发布重要通知事件（不再直接调用气泡回调）
+	intelliAnalyzerInstance = ai.NewIntelliAnalyzer(agent, m.storage, eventbus.GetGlobalEventBus())
 	intelliAnalyzerInstance.Start(ctx)
 	log.Println("[IntelliAnalyzer] 智能消息分析器已启动")
 }
